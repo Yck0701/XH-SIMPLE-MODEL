@@ -41,15 +41,20 @@ def write_settings(mesh, settings, surface=None):
         'surface': surface or {}}, ensure_ascii=False))
 
 
-def create(settings, folder='/Game/VFXMeshes', name=None, surface=None):
-    settings = geometry.validate(settings)
+def new_asset_path(settings, folder, name=None):
     folder = folder.strip().rstrip('/')
-    if not re.fullmatch(r'/Game(?:/[A-Za-z0-9_\u4e00-\u9fff]+)+', folder):
-        raise ValueError('保存目录格式：/Game/VFXMeshes（可使用中文、字母、数字、下划线）。')
+    if not re.fullmatch(r'/Game(?:/[A-Za-z0-9_\u4e00-\u9fff]+)*', folder):
+        raise ValueError('请在内容浏览器中选择工程 Content 下的文件夹。')
     name = (name or ('SM_VFX_' + settings['shape'])).strip()
     if not re.fullmatch(r'[A-Za-z_\u4e00-\u9fff][A-Za-z0-9_\u4e00-\u9fff]*', name):
         raise ValueError('模型名称请使用中文、字母、数字、下划线，且不能以数字开头。')
     path, _ = unreal.AssetToolsHelpers.get_asset_tools().create_unique_asset_name(folder + '/' + name, '')
+    return path
+
+
+def create(settings, folder='/Game/VFXMeshes', name=None, surface=None):
+    settings = geometry.validate(settings)
+    path = new_asset_path(settings, folder, name)
     dynamic, stats = dynamic_mesh(settings)
     options = unreal.GeometryScriptCreateNewStaticMeshAssetOptions(
         enable_nanite=False, enable_collision=False,
@@ -80,12 +85,21 @@ def update(mesh, settings, surface=None):
 
 def save(mesh):
     read(mesh)
-    material = mesh.get_material(0)
-    if material and unreal.EditorAssetLibrary.get_metadata_tag(material, 'VFXMeshGenerator.Material'):
-        if not unreal.EditorAssetLibrary.save_loaded_asset(material):
-            raise RuntimeError('材质保存失败，请检查目录权限。')
+    if not mesh.get_path_name().startswith('/Game/'):
+        raise ValueError('只允许保存当前工程 Content 下的模型。')
     if not unreal.EditorAssetLibrary.save_loaded_asset(mesh):
         raise RuntimeError('网格保存失败，请检查目录权限。')
+
+
+def content_folder():
+    folders = unreal.EditorUtilityLibrary.get_selected_folder_paths()
+    current = unreal.EditorUtilityLibrary.get_current_content_browser_path()
+    if isinstance(current, tuple):current = next((v for v in current if isinstance(v,str)), '')
+    folder = str(folders[0]) if len(folders)==1 else str(current or '')
+    if folder.startswith('/All/'):folder = folder[4:]
+    if folder != '/Game' and not folder.startswith('/Game/'):
+        raise ValueError('请在 UE 内容浏览器选中工程 Content 下的文件夹，再点“使用所选目录”。')
+    return folder.rstrip('/')
 
 
 def selected():

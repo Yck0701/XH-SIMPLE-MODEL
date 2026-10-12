@@ -100,6 +100,37 @@ class LauncherTests(unittest.TestCase):
         core.write_json(self.project,{'Plugins':[{'Name':'PythonScriptPlugin','Enabled':False}]})
         with self.assertRaises(ValueError):self.install()
 
+    def test_native_engine_mismatch_leaves_plugin_unchanged(self):
+        self.install()
+        project_before=self.project.read_bytes()
+        archive,item=self.package('1.2.0',script='new')
+        engine=self.root/'Engine';exe=engine/'Binaries/Win64/UnrealEditor.exe'
+        exe.parent.mkdir(parents=True);exe.write_bytes(b'editor')
+        core.write_json(engine/'Build/Build.version',{'MajorVersion':5,'MinorVersion':8})
+        core.write_json(exe.parent/'UnrealEditor.modules',{'BuildId':'installed-build'})
+        with zipfile.ZipFile(archive,'a') as z:
+            z.writestr('VFXMeshGenerator/Native/Win64/other-build/manifest.json','{}')
+        item.update(sha256=core.digest(archive),size=archive.stat().st_size)
+        with self.assertRaisesRegex(ValueError,'匹配'):
+            core.install(self.project,archive,item,editor_probe=lambda _:[],engine_path=exe)
+        self.assertEqual(core.project_info(self.project)['version'],'1.1.0')
+        self.assertEqual(self.project.read_bytes(),project_before)
+        self.assertEqual((core.project_info(self.project)['plugin']/'Content/Python/runtime.py').read_text(),'first')
+
+    def test_native_engine_fingerprint_is_checked(self):
+        archive,item=self.package('1.2.0')
+        engine=self.root/'Engine';exe=engine/'Binaries/Win64/UnrealEditor.exe'
+        exe.parent.mkdir(parents=True);exe.write_bytes(b'editor')
+        core.write_json(engine/'Build/Build.version',{'MajorVersion':5,'MinorVersion':8})
+        core.write_json(exe.parent/'UnrealEditor.modules',{'BuildId':'installed-build'})
+        (exe.parent/'UnrealEditor-Core.dll').write_bytes(b'changed-engine')
+        with zipfile.ZipFile(archive,'a') as z:
+            z.writestr('VFXMeshGenerator/Native/Win64/installed-build/manifest.json',json.dumps({'engine_sha256':{'Binaries/Win64/UnrealEditor-Core.dll':'0'*64}}))
+        item.update(sha256=core.digest(archive),size=archive.stat().st_size)
+        with self.assertRaisesRegex(ValueError,'不匹配'):
+            core.install(self.project,archive,item,editor_probe=lambda _:[],engine_path=exe)
+        self.assertFalse(core.project_info(self.project)['plugin'].exists())
+
     def test_feed_selects_newest_product_release(self):
         def release(v,**kwargs):
             return dict(tag_name='vfx-v'+v,assets=[{'name':'vfx-manifest.json','browser_download_url':core.WEB+'/releases/download/vfx-v'+v+'/vfx-manifest.json'}],**kwargs)
@@ -131,16 +162,16 @@ class LauncherTests(unittest.TestCase):
         import app
         archive=self.root/'launcher.zip'
         with zipfile.ZipFile(archive,'w') as z:
-            z.writestr('VFXMeshLauncher/version.json',json.dumps({'version':'1.2.0'}))
+            z.writestr('VFXMeshLauncher/version.json',json.dumps({'version':'9.0.0'}))
             z.writestr('VFXMeshLauncher/VFX特效网格启动器.exe',b'test-executable')
-        item={'version':'1.2.0','sha256':core.digest(archive),'size':archive.stat().st_size}
+        item={'version':'9.0.0','sha256':core.digest(archive),'size':archive.stat().st_size}
         with patch.object(app,'STATE',self.root/'self-update'),patch.object(app.core,'download',return_value=archive),patch.object(app.subprocess,'Popen') as launch:
             window=app.App(auto_check=False);window.withdraw();window.feed={'launcher':item}
             window.update_launcher();deadline=time.monotonic()+3
             while not window.closing and time.monotonic()<deadline:window.update();time.sleep(.03)
             self.assertTrue(window.closing);launch.assert_called_once()
             pointer=core.read_json(app.STATE/'preferred-launcher.json')
-            self.assertEqual(pointer['version'],'1.2.0');self.assertEqual(pointer['sha256'],core.digest(pointer['exe']))
+            self.assertEqual(pointer['version'],'9.0.0');self.assertEqual(pointer['sha256'],core.digest(pointer['exe']))
 
 
 if __name__=='__main__':unittest.main()

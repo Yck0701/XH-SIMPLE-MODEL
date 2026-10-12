@@ -1,39 +1,41 @@
 # VFX 特效网格生成器
 
-在 Unreal 编辑器里直接调整特效模型，Niagara 引用同一个 Static Mesh 后，拖动参数就能看到变化。
+在 Unreal 编辑器中调节网格参数，使用自己的材质，通过原生视口实时预览。Niagara 引用一次 Static Mesh 后，继续调整同一个模型即可。
 
-**[下载 Windows 启动器](https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/latest)** · **[使用教学](docs/使用教学.md)**
+**[下载 Windows 启动器](https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/latest)** · **[5 步使用教学](docs/使用教学.md)**
 
 ## 三步开始
 
-1. 下载发行版中的 `VFXMeshLauncher-版本-Windows.zip`，**完整解压**，双击 `VFX特效网格启动器.exe`。无需安装 Python。
-2. 选择你的 `.uproject`，确认对应的 UE 5.8 引擎，点击 **安装 / 更新插件**。
-3. 首次安装后重新启动工程，点击 **启动 UE / 打开面板**，创建模型；在 Niagara 的 Mesh Renderer 里选中它。
+1. 完整解压 `VFXMeshLauncher-1.2.0-Windows.zip`，双击 `VFX特效网格启动器.exe`。无需安装 Python。
+2. 选择 `.uproject` 和对应引擎，点击 **安装 / 更新插件**。从旧版升级到 1.2.0，需要先保存自己的工作并关闭该工程。
+3. 重新打开 UE，在顶部 **特效网格 → 打开独立工作台** 进入。左侧调参、右侧预览；点击 **保存模型…** 并确认后生成资产。
 
-启动器默认每次启动都检查本仓库的正式发行版。下载后校验 SHA-256，并在工程的 Saved 目录备份旧插件。断网时可以安装内置版本。
+## 1.2.0 功能
 
-## 功能
-
-- 九种参数化网格、分段、变换、轴向、枢轴与法线翻转。
-- 主贴图与遮罩贴图，独立 UV 翻转、旋转与流速。
-- 编辑器内实时修改原 Static Mesh；支持 Niagara 粒子颜色和透明度。
-- 参数随模型保存，载入所选模型继续修改，支持撤回。
-- 兼容的 Python 脚本更新可热重载，保留当前面板中的未保存参数。
-- 面板、材质资源、插件依赖或热更新组件变化时，需要保存并关闭工程后更新。
-- 启动器自身也可在“更新中心”升级，采用独立版本目录，无需覆盖正在运行的 EXE。
+- 独立可停靠工作台，紧凑的左右布局，九种参数化网格。
+- UE 原生视口与官方高级预览场景：左键旋转、中键平移、滚轮或右键拖动缩放、F 聚焦。
+- HDRI 环境、灯光、后处理和地面来自引擎预览场景；可切换地板、网格、坐标轴和原点。
+- 选择项目已有材质或材质实例，通过“编辑当前材质”打开 UE 原生材质编辑器。
+- 新建只生成预览草稿；目录从内容浏览器获取，每次确认保存只写当前模型。
+- 编辑器内更新同一个 Static Mesh，已有 Niagara 引用保持不变；参数随模型保存，支持载入和撤回。
+- 启动器启动自动检查 GitHub 更新，包含离线包、SHA-256 校验、更新前备份、失败回退及启动器自身更新。
+- 兼容脚本更新支持热重载；面板、原生组件、依赖或连接组件变化时需要关闭工程更新。
 
 ## 适用环境
 
-Windows 10/11 x64、Unreal Engine **5.8**。已在 UE 5.8.3 验证。仅供编辑器制作使用；生成结果是普通 Static Mesh 与材质资产。依赖 Python Script Plugin、Editor Scripting Utilities、Geometry Scripting 和 Niagara，插件描述文件会声明这些依赖。若工程显式禁用了依赖，启动器会提示先启用。
+Windows x64、UE **5.8.3**。原生组件按引擎 BuildId 和二进制指纹匹配，发行包包含官方构建 `55116800` 和定制构建 `93941773-5036-42be-9ee8-469d175d5470`。其他构建即使版本号相同，也需要重新编译适配组件；启动器会在安装前检查。
 
-半透明特效网格默认关闭 Nanite。第一次从旧版升级后，需要重启一次 UE 才能建立热更新连接。
+插件用于编辑器制作，不包含运行时变形。依赖 Python Script Plugin、Editor Scripting Utilities、Geometry Scripting 和 Niagara。半透明特效网格默认关闭 Nanite、不生成碰撞。
+
+预览使用 UE 官方资产预览场景体系，不会复制当前关卡的灯光。Niagara 的粒子颜色、时间、覆盖材质仍应在 Niagara 编辑器中检查。旧版工具材质资源保留用于已有资产兼容，新界面使用用户材质。
 
 ## 源码与维护
 
-- `Plugin/VFXMeshGenerator`：Unreal 插件。
-- `Launcher`：Python/Tk Windows 启动器。
-- `tests`：更新、安装、备份、失败回退及界面启动检查测试。
-- `scripts/build_release.py`：构建离线包、EXE 与发行版清单。
-- [发布新版本](docs/发布新版本.md)
+- `Plugin/VFXMeshGenerator`：Python 工作台、网格生成与小型原生预览适配组件源码。
+- `Launcher`：Windows 启动器。
+- `tests`：安装、更新、回退测试及隔离 UE 工程中的保存验证脚本。
+- `scripts/build_native.py`：为指定引擎生成预览组件。
+- `scripts/build_release.py`：构建 EXE、离线插件和发行清单。
+- [发布流程](docs/发布新版本.md) · [验证记录](docs/验证记录.md)
 
 本仓库尚未指定开源许可证。源码公开不代表授予额外使用或分发许可。

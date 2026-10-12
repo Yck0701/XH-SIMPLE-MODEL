@@ -133,7 +133,7 @@ class App(tk.Tk):
         self.label(versions,'默认自动检查更新；无法联网时可安装内置版本。','CardMuted.TLabel',padding=(0,10,0,0))
         actions=ttk.Frame(page);actions.pack(fill='x',pady=(4,12))
         self.button(actions,'2  安装 / 更新插件',self.install,accent=True,lock=True).pack(side='left',padx=(0,10))
-        self.button(actions,'3  启动 UE / 打开面板',self.launch,lock=True).pack(side='left')
+        self.button(actions,'3  启动 UE / 独立工作台',self.launch,lock=True).pack(side='left')
         self.label(page,'首次安装需要重启一次 UE，之后兼容的脚本更新可直接热重载。','Muted.TLabel',padding=(0,6))
         self.label(page,'在 Niagara 中把生成的模型指定给 Mesh Renderer 一次，之后即可实时调参。','Muted.TLabel',wraplength=740)
         self.button(page,'第一次用？查看 5 步教学 →',lambda:self.show('guide')).pack(anchor='w',pady=(15,0))
@@ -151,16 +151,16 @@ class App(tk.Tk):
         self.label(page,'更新说明','Heading.TLabel',padding=(0,24,0,12))
         self.label(page,textvariable=self.notes,wraplength=735,justify='left')
         self.label(page,'更新规则','Heading.TLabel',padding=(0,25,0,12))
-        self.label(page,'• 脚本更新：下载校验后直接刷新 UE 面板，保留未保存的模型参数。\n• 面板 / 材质资源更新：先保存并关闭该工程，再点击更新。\n• 无法联网：继续使用当前版本，稍后再检查。\n• 不会自动关闭 UE，也不会覆盖工程中的特效模型。',wraplength=730,style='Muted.TLabel',justify='left')
+        self.label(page,'• 脚本更新：下载校验后直接刷新 UE 面板，保留未保存的模型参数。\n• 面板 / 原生组件 / 资源更新：先保存并关闭该工程，再点击更新。\n• 无法联网：继续使用当前版本，稍后再检查。\n• 不会自动关闭 UE，也不会覆盖工程中的特效模型。',wraplength=730,style='Muted.TLabel',justify='left')
 
     def build_guide(self):
         page=self.pages['guide'];self.label(page,'5 步做出第一个特效网格','Title.TLabel')
         self.label(page,'跟着做一遍，之后只需拖参数。','Muted.TLabel',padding=(0,7,0,20))
         steps=[('01   选工程 → 安装','回到“开始使用”，选中 .uproject，点击“安装 / 更新插件”。第一次安装后重启 UE。'),
-            ('02   打开工具 → 新建模型','点“启动 UE / 打开面板”。选择“球”或“圆环”，点击面板里的“新建模型”。'),
-            ('03   在 Niagara 中引用一次','进入 Niagara 发射器：Mesh Renderer → Meshes → 第 0 项 → Mesh，选择刚生成的 SM_VFX 模型。'),
-            ('04   拖参数 → 立即看效果','开启面板“实时更新”，拖动半径、分段等参数。主贴图与遮罩的 UV 翻转、旋转、流速可分别调整。'),
-            ('05   保存 → 下次接着改','点击面板“保存”。下次在内容浏览器选中模型，点“载入所选”，就能继续调参。')]
+            ('02   打开独立工作台','点“启动 UE / 独立工作台”，或 UE 顶部“特效网格”菜单。左侧调参数，右侧鼠标旋转、平移、缩放预览。'),
+            ('03   使用自己的材质','选择材质或材质实例，点“编辑当前材质”打开 UE 原生材质窗口。预览沿用 UE 官方高级预览场景。'),
+            ('04   选 UE 目录 → 确认保存','在内容浏览器选文件夹，点“使用所选目录”，再点“保存模型…”。确认后只保存这个模型，不保存其他资产。'),
+            ('05   Niagara 引用 → 实时调参','Mesh Renderer → Meshes → 第 0 项 → Mesh 选择保存的模型。修改参数更新同一资产；再次保存仍需确认。')]
         for title,body in steps:
             card=self.card(page);self.label(card,title,'CardHeading.TLabel');self.label(card,body,'CardMuted.TLabel',wraplength=710,justify='left',padding=(0,6,0,0))
         self.button(page,'打开完整图解教学 ↗',self.open_guide).pack(anchor='w',pady=(0,6))
@@ -276,12 +276,12 @@ class App(tk.Tk):
         self.status.set('正在校验并安装插件，请稍等…');self.progress['value']=0
         def job():
             archive=BASE/'offline'/item['file'] if origin=='offline' else core.download(item,STATE/'Downloads',lambda v:self.events.put(('progress',v)))
-            return core.install(project,archive,item)
+            return core.install(project,archive,item,engine_path=engine)
         def done(result):
             self.progress['value']=100;self.refresh_project()
             self.status.set({'hot_reloaded':'已完成热更新，UE 面板已刷新，当前模型参数保留。',
                 'restart_required':'插件已更新。首次启用热更新连接，请保存并重启 UE 一次。',
-                'installed':'安装完成，点击“启动 UE / 打开面板”开始制作。'}[result['mode']])
+                'installed':'安装完成，点击“启动 UE / 独立工作台”开始制作。'}[result['mode']])
         self.worker(job,done)
 
     def launch(self):

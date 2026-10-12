@@ -34,7 +34,7 @@ _loaded_version = _version()
 
 def _reload():
     global _loaded_version, _recovery_panel
-    from . import runtime, geometry, engine, materials
+    from . import runtime, geometry, engine, preview
     old = _recovery_panel or runtime._panel
     _recovery_panel = old
     # Rebind to the existing widget; preserve the in-memory mesh and unsaved edits.
@@ -42,18 +42,12 @@ def _reload():
         unreal.unregister_slate_post_tick_callback(runtime._watch)
         runtime._watch = None
     importlib.invalidate_caches()
-    for module in (geometry, engine, materials, runtime):
+    for module in (geometry, engine, preview, runtime):
         importlib.reload(module)
     runtime.startup()
     if old:
         panel = runtime.open_panel()
-        for key in ('mesh','settings','surface','live','history','last_applied','geometry_dirty','surface_dirty'):
-            setattr(panel, key, getattr(old, key))
-        panel.pending = old.pending
-        panel.folder.set_text(old.folder.get_text())
-        panel.name.set_text(old.name.get_text())
-        panel.sync_controls()
-        if panel.mesh: panel.asset_label.set_text(panel.mesh.get_path_name())
+        runtime._restore(panel, old)
         panel.status.set_text('插件已热更新，当前模型与未保存参数已保留。')
     _loaded_version = _version()
     _recovery_panel = None

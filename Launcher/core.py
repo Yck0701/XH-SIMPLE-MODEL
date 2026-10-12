@@ -298,19 +298,28 @@ def project_lock(info):
             if os.name=='nt':stream.seek(0);msvcrt.locking(stream.fileno(),msvcrt.LK_UNLCK,1)
 
 
-def install(project, archive, expected, editor_probe=running_editors, ipc=bridge_request):
+def install(project, archive, expected, editor_probe=running_editors, ipc=bridge_request, engine_path=None):
     info=project_info(project)
     if info['disabled']:raise ValueError('工程禁用了依赖插件，请在 UE 插件设置中启用：'+ '、'.join(info['disabled']))
     if digest(archive)!=expected['sha256'] or Path(archive).stat().st_size!=expected['size']:raise ValueError('安装包校验失败。')
     with project_lock(info),tempfile.TemporaryDirectory(prefix='stage-',dir=info['saved']) as temporary:
         staged=safe_extract(archive,Path(temporary),PLUGIN)
         descriptor=read_json(staged/(PLUGIN+'.uplugin'))
+        if (staged/'Native/Win64').is_dir():
+            selected=engine_path or detect_engine(info)
+            if not selected:raise ValueError('请选择此工程对应的 UE 引擎，以匹配原生预览组件。')
+            root=validate_engine(selected).parents[2]
+            build=read_json(root/'Binaries/Win64/UnrealEditor.modules')['BuildId']
+            manifest=staged/'Native/Win64'/build/'manifest.json'
+            if not manifest.is_file():raise ValueError('此引擎尚无匹配的原生预览组件，需要为当前引擎构建适配包。未更改工程。')
+            for name,checksum in read_json(manifest)['engine_sha256'].items():
+                if digest(root/name)!=checksum:raise ValueError('引擎文件与预览组件不匹配，未更改工程。')
         if descriptor.get('VersionName')!=expected['version']:raise ValueError('安装包版本与更新信息不一致。')
         if info['version'] and version_tuple(expected['version'])<version_tuple(info['version']):raise ValueError('不会将较新插件覆盖为旧版本。恢复旧版请使用备份功能。')
         editors=editor_probe(info)
         if len(editors)>1:raise ValueError('此工程打开了多个 UE 实例，请先关闭多余实例。')
         hot=can_hot_update(info['plugin'],staged)
-        if editors and not hot:raise ValueError('此次包含面板或材质资源更新，请保存并关闭此工程，再点击安装 / 更新。')
+        if editors and not hot:raise ValueError('此次包含面板、原生组件或资源更新，请保存并关闭此工程，再点击安装 / 更新。')
         state=heartbeat(info)
         if state and state.get('pid') not in editors:state=None
         backup=None
