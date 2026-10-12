@@ -1,0 +1,18 @@
+{
+  "FileVersion": 3,
+  "Version": 110,
+  "VersionName": "1.1.0",
+  "FriendlyName": "VFX 特效网格生成器",
+  "Description": "在编辑器内实时调整九种特效网格，直接更新 Niagara 使用的静态网格资产。",
+  "Category": "Editor",
+  "CreatedBy": "XH",
+  "CanContainContent": true,
+  "EnabledByDefault": true,
+  "IsBetaVersion": true,
+  "Plugins": [
+    {"Name":"PythonScriptPlugin","Enabled":true,"TargetAllowList":["Editor"]},
+    {"Name":"EditorScriptingUtilities","Enabled":true,"TargetAllowList":["Editor"]},
+    {"Name":"GeometryScripting","Enabled":true,"TargetAllowList":["Editor"]},
+    {"Name":"Niagara","Enabled":true}
+  ]
+}

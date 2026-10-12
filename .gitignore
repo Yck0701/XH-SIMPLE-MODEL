@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+build/
+dist/
+release/
+*.spec
+Saved/
+Intermediate/
+Binaries/
+*.log
+settings.json
