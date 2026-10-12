@@ -2,6 +2,7 @@
 #include "Components/NativeWidgetHost.h"
 #include "Components/DynamicMeshComponent.h"
 #include "UDynamicMesh.h"
+#include "DynamicMesh/DynamicMesh3.h"
 #include "SEditorViewport.h"
 #include "AdvancedPreviewScene.h"
 #include "EditorViewportClient.h"
@@ -25,6 +26,8 @@ public:
     FBox MeshBox=FBox(FVector(-100),FVector(100));
     bool bAxes=true;
     bool bTurntable=false;
+    bool bWireframe=false;
+    TArray<TPair<FVector,FVector>> Edges;
     FVFXViewportClient(TSharedPtr<FAdvancedPreviewScene> InScene,TSharedRef<SEditorViewport> Widget)
         :FEditorViewportClient(nullptr,InScene.Get(),Widget),Scene(InScene)
     {
@@ -64,6 +67,11 @@ public:
     virtual void Draw(const FSceneView* View,FPrimitiveDrawInterface* PDI) override
     {
         FEditorViewportClient::Draw(View,PDI);
+        if(bWireframe)
+        {
+            for(const auto& Edge:Edges)
+                PDI->DrawLine(Edge.Key,Edge.Value,FLinearColor(.05f,.8f,1.f),SDPG_World,.8f,1.f,true);
+        }
         if(bAxes)
         {
             const float Length=FMath::Max(20.f,float(MeshBox.GetExtent().GetMax())*.7f);
@@ -113,12 +121,41 @@ public:
     {
         Mesh->SetDynamicMesh(Dynamic);Mesh->SetMaterial(0,Material?Material:UMaterial::GetDefaultMaterial(MD_Surface));
         Mesh->UpdateBounds();Mesh->MarkRenderStateDirty();VFXClient->MeshBox=Mesh->Bounds.GetBox();
+        VFXClient->Edges.Reset();
+        Dynamic->ProcessMesh([this](const UE::Geometry::FDynamicMesh3& Data)
+        {
+            VFXClient->Edges.Reserve(Data.EdgeCount());
+            for(int ID:Data.EdgeIndicesItr())
+            {
+                const auto Pair=Data.GetEdgeV(ID);
+                VFXClient->Edges.Emplace(Data.GetVertex(Pair.A),Data.GetVertex(Pair.B));
+            }
+        });
         Scene->SetFloorOffset(float(-VFXClient->MeshBox.Min.Z));
         if(bFrame)VFXClient->Focus();Invalidate();
     }
 };
 
 static TMap<FString,TWeakPtr<SVFXNativeViewport>> Viewports;
+// Python editing APIs identify global parameters by name only. Reject ambiguous
+// names and layer parameters so an edit cannot target a different parameter.
+extern "C" __declspec(dllexport) int VFX_GlobalParameter(const wchar_t* MaterialPath,int Kind,const wchar_t* Name)
+{
+    if(!IsInGameThread())return 0;
+    auto* Material=FindObject<UMaterialInterface>(nullptr,MaterialPath);if(!Material)return 0;
+    int Matches=0;int FoundKind=-1;
+    for(int Type=0;Type<4;Type++)
+    {
+        TArray<FMaterialParameterInfo> Info;TArray<FGuid> Guids;
+        if(Type==0)Material->GetAllScalarParameterInfo(Info,Guids);
+        if(Type==1)Material->GetAllVectorParameterInfo(Info,Guids);
+        if(Type==2)Material->GetAllTextureParameterInfo(Info,Guids);
+        if(Type==3)Material->GetAllStaticSwitchParameterInfo(Info,Guids);
+        for(const auto& P:Info)if(P.Name==FName(Name) && P.Association==EMaterialParameterAssociation::GlobalParameter)
+        {Matches++;FoundKind=Type;}
+    }
+    return Matches==1 && FoundKind==Kind;
+}
 extern "C" __declspec(dllexport) int VFX_Attach(const wchar_t* HostPath)
 {
     if(!IsInGameThread())return 0;
@@ -154,6 +191,12 @@ extern "C" __declspec(dllexport) int VFX_Focus(const wchar_t* HostPath)
 {
     if(!IsInGameThread())return 0;
     auto* Weak=Viewports.Find(HostPath);auto View=Weak?Weak->Pin():nullptr;if(!View)return 0;View->VFXClient->Focus();return 1;
+}
+extern "C" __declspec(dllexport) int VFX_Wireframe(const wchar_t* HostPath,int Enabled)
+{
+    if(!IsInGameThread())return 0;
+    auto* Weak=Viewports.Find(HostPath);auto View=Weak?Weak->Pin():nullptr;if(!View)return 0;
+    View->VFXClient->bWireframe=Enabled!=0;View->Invalidate();return 1;
 }
 extern "C" __declspec(dllexport) int VFX_Camera(const wchar_t* HostPath,double* Values)
 {

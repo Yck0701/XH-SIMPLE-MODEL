@@ -34,15 +34,16 @@ _loaded_version = _version()
 
 def _reload():
     global _loaded_version, _recovery_panel
-    from . import runtime, geometry, engine, preview
+    from . import runtime, geometry, engine, preview, material_sidebar
     old = _recovery_panel or runtime._panel
+    if old and hasattr(old,'material_sidebar'):old.material_sidebar.flush()
     _recovery_panel = old
     # Rebind to the existing widget; preserve the in-memory mesh and unsaved edits.
     if runtime._watch is not None:
         unreal.unregister_slate_post_tick_callback(runtime._watch)
         runtime._watch = None
     importlib.invalidate_caches()
-    for module in (geometry, engine, preview, runtime):
+    for module in (geometry, engine, preview, material_sidebar, runtime):
         importlib.reload(module)
     runtime.startup()
     if old:

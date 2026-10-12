@@ -3,7 +3,7 @@ import copy
 import time
 import traceback
 import unreal
-from . import geometry, engine, preview
+from . import geometry, engine, preview, material_sidebar
 
 WIDGET='/VFXMeshGenerator/UI/EUW_VFXMesh'
 TAB='VFXMeshGenerator.Workspace'
@@ -132,7 +132,7 @@ class Panel:
         actions=self.obj(unreal.HorizontalBox);self.add(left,actions)
         self.button(actions,'使用所选材质',self.use_selected_material)
         self.button(actions,'编辑当前材质',self.edit_material,'打开该材质或材质实例的 UE 原生编辑器')
-        self.text(left,'材质参数在原生材质窗口调整；本工具不会保存材质。',9,(.6,.65,.7,1))
+        self.material_sidebar=material_sidebar.Sidebar(self,left)
         self.heading(left,'更新与撤回')
         actions=self.obj(unreal.HorizontalBox);self.add(left,actions)
         self.check(actions,'live','实时更新',True,'options')
@@ -151,7 +151,7 @@ class Panel:
         self.text(actions,'左键旋转 · 中键平移 · 滚轮 / 右键缩放 · F 聚焦',9,(.65,.7,.75,1))
         self.viewer=preview.Preview(self,right)
         options=self.obj(unreal.HorizontalBox);self.add(right,options)
-        for key,label,value in [('axes','坐标轴 / 原点',True),('grid','网格',True),('floor','地板',True),('environment','环境',True),('turntable','自动旋转',False)]:self.check(options,key,label,value,'preview')
+        for key,label,value in [('wireframe','模型线框',False),('axes','坐标轴 / 原点',True),('grid','网格',True),('floor','地板',True),('environment','环境',True),('turntable','自动旋转',False)]:self.check(options,key,label,value,'preview')
         self.preview_stats=self.text(right,'预览正在准备…',10,(.65,.7,.75,1))
         self.text(right,'预览场景独立于当前关卡。保存后的模型可指定给 Niagara Mesh Renderer。',9,(.65,.7,.75,1))
         self.status=self.text(body,'拖动参数即可预览；确认保存后才会新建模型资产。',10,(.65,.85,.7,1))
@@ -183,6 +183,7 @@ class Panel:
         if self.loading:return
         material=self.pickers.get_editor_property('material')
         self.surface={'mode':'custom','material':material.get_path_name() if material else ''}
+        self.material_sidebar.refresh()
         self.surface_dirty=True;self.unsaved=True;self.queue()
 
     def use_selected_material(self):
@@ -213,6 +214,7 @@ class Panel:
                 else:control.set_selected_option(labels[key][value])
             self.pickers.set_editor_property('material',self.current_material());self.visibility()
         finally:self.loading=False
+        self.material_sidebar.refresh()
         self.viewer.update(self.settings,self.current_material())
 
     def confirm(self,title,message):
@@ -283,7 +285,7 @@ class Panel:
             self.pending=None;self.geometry_dirty=self.surface_dirty=False
         else:self.apply()
         engine.save(self.mesh);self.unsaved=False;self.asset_label.set_text(self.mesh.get_path_name())
-        self.status.set_text('已保存当前模型。材质请在自己的材质编辑器中单独保存。');self.locate();return True
+        self.status.set_text('已保存当前模型。材质参数请点击侧栏“保存当前材质…”单独确认保存。');self.locate();return True
 
     def locate(self):
         if self.mesh:unreal.EditorAssetLibrary.sync_browser_to_objects([self.mesh.get_path_name()])
@@ -291,14 +293,16 @@ class Panel:
     def tick(self):
         now=time.monotonic();dt=min(now-self.last_tick,.1);self.last_tick=now
         if self.pending is not None and now>=self.pending:self.safe(self.apply)
+        self.material_sidebar.tick()
         self.viewer.tick(dt)
 
 
 def _restore(panel,old):
+    if hasattr(old,'material_sidebar'):old.material_sidebar.flush()
     for key in ('mesh','settings','surface','live','history','last_applied','geometry_dirty','surface_dirty','pending','unsaved'):
         if hasattr(old,key):setattr(panel,key,getattr(old,key))
     if hasattr(old,'viewer'):
-        for key in ('axes','grid','floor','environment','turntable'):
+        for key in ('axes','grid','floor','environment','turntable','wireframe'):
             if hasattr(old.viewer,key):setattr(panel.viewer,key,getattr(old.viewer,key))
     if panel.mesh:
         material=panel.mesh.get_material(0)
@@ -328,7 +332,9 @@ def _tick(_):
         if widget and (_panel is None or widget!=_panel.widget):
             old=_panel;_panel=Panel(widget)
             if old:_restore(_panel,old)
-        if not widget and _panel:_panel.pending=None
+        if not widget and _panel:
+            _panel.pending=None
+            if hasattr(_panel,'material_sidebar'):_panel.safe(_panel.material_sidebar.flush)
     if _panel and _tab_open:_panel.safe(_panel.tick)
 
 

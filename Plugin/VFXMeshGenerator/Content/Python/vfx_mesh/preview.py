@@ -33,13 +33,15 @@ def native():
                           ('VFX_Options',[ctypes.c_wchar_p]+[ctypes.c_int]*5),('VFX_Focus',[ctypes.c_wchar_p]),
                           ('VFX_Camera',[ctypes.c_wchar_p,ctypes.POINTER(ctypes.c_double)])]:
         fn=getattr(dll,name);fn.argtypes=signature;fn.restype=ctypes.c_int
+    dll.VFX_Wireframe.argtypes=[ctypes.c_wchar_p,ctypes.c_int];dll.VFX_Wireframe.restype=ctypes.c_int
+    dll.VFX_GlobalParameter.argtypes=[ctypes.c_wchar_p,ctypes.c_int,ctypes.c_wchar_p];dll.VFX_GlobalParameter.restype=ctypes.c_int
     _dll=dll;return dll
 
 
 class Preview:
     def __init__(self,panel,parent):
         self.panel=panel;self.dirty=True;self.frame_next=True;self.attached=False
-        self.axes=True;self.grid=True;self.floor=True;self.environment=True;self.turntable=False
+        self.axes=True;self.grid=True;self.floor=True;self.environment=True;self.turntable=False;self.wireframe=False
         self.settings=geometry.defaults();self.material=None;self.dynamic=None;self.last_flags=None
         self.host=panel.obj(unreal.NativeWidgetHost)
         slot=panel.add(parent,self.host,0);slot.set_size(unreal.SlateChildSize(size_rule=unreal.SlateSizeRule.FILL))
@@ -67,8 +69,9 @@ class Preview:
                 raise RuntimeError('预览网格更新失败。')
             self.panel.preview_stats.set_text('%s 顶点  ·  %s 三角形  ·  UE 原生预览场景' % (stats['vertices'],stats['triangles']))
             self.dirty=False;self.frame_next=False
-        flags=tuple(map(int,(self.axes,self.grid,self.floor,self.environment,self.turntable)))
-        if flags!=self.last_flags:self.dll.VFX_Options(self.path,*flags);self.last_flags=flags
+        flags=tuple(map(int,(self.axes,self.grid,self.floor,self.environment,self.turntable,self.wireframe)))
+        if flags!=self.last_flags:
+            self.dll.VFX_Options(self.path,*flags[:5]);self.dll.VFX_Wireframe(self.path,flags[5]);self.last_flags=flags
 
     def camera(self):
         result=(ctypes.c_double*6)()
