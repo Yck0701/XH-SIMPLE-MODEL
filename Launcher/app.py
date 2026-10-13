@@ -159,7 +159,7 @@ class App(tk.Tk):
         steps=[('01   选工程 → 安装','回到“开始使用”，选中 .uproject，点击“安装 / 更新插件”。第一次安装后重启 UE。'),
             ('02   打开独立工作台','从 UE 顶部“特效网格”打开工作台。左侧调模型，中间鼠标控制预览，右侧切换材质 / 环境；顶部可收起两侧面板。'),
             ('03   调整材质与环境','材质在侧栏直接调整，保存时选择替换或新增实例，成功后显示路径。开启“实时迭代原材质”可联动 Niagara。环境页可调 HDRI、灯光、曝光和地板。'),
-            ('04   选 UE 目录 → 确认保存','在内容浏览器选文件夹，点“使用所选目录”，再点“保存生成模型…”。材质保存会打开独立确认弹窗，两者分别保存。'),
+            ('04   选 UE 目录 → 确认保存','在内容浏览器选文件夹，点“使用所选目录”，再点左侧“保存位置”下方的“保存生成模型…”。材质保存会打开独立确认弹窗，两者分别保存。'),
             ('05   Niagara 引用 → 实时调参','Mesh Renderer → Meshes → 第 0 项 → Mesh 选择保存的模型。修改参数更新同一资产；再次保存仍需确认。')]
         for title,body in steps:
             card=self.card(page);self.label(card,title,'CardHeading.TLabel');self.label(card,body,'CardMuted.TLabel',wraplength=710,justify='left',padding=(0,6,0,0))

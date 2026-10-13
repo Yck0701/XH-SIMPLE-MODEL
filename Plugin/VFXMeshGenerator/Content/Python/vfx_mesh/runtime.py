@@ -127,7 +127,6 @@ class Panel:
         self.text(top,'特效网格工作台',14,wrap=False)
         self.button(top,'新建参数模型',self.new,'新建可调整形状的预览草稿；保存确认后才创建资产')
         self.button(top,'载入所选网格',self.load_selected,'从内容浏览器载入所选网格：本工具生成的模型可继续调参，其他模型进入自定义预览')
-        self.save_button=self.button(top,'保存生成模型…',self.save,'每次确认后只保存列出的目标资产')
         self.locate_button=self.button(top,'定位模型',self.locate,'在内容浏览器定位当前已存在的网格资产')
         self.button(top,'重置布局',self.reset_layout)
         self.fill(self.add(top,self.obj(unreal.Spacer)))
@@ -164,6 +163,8 @@ class Panel:
         self.button(actions,'使用所选目录',self.pick_folder)
         self.name=self.obj(unreal.EditableTextBox);self.name.set_hint_text('模型名，留空自动命名');self.add(save,self.name)
         self.text(save,'在内容浏览器选文件夹，再点“使用所选目录”。已有模型保存在原位置。',9,(.6,.65,.7,1))
+        self.save_button=self.button(left,'保存生成模型…',self.save,'每次确认后只保存列出的目标资产')
+        self.save_button.set_background_color(unreal.LinearColor(.08,.3,.3,1))
         right=self.obj(unreal.VerticalBox);self.center_box=right
         actions=self.obj(unreal.HorizontalBox);self.add(right,actions)
         self.heading(actions,'实时预览')
