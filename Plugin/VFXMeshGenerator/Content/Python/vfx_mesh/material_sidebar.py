@@ -2,7 +2,7 @@
 import ctypes
 import datetime
 import unreal
-from . import engine,preview
+from . import engine,preview,storage
 
 
 class Sidebar:
@@ -75,6 +75,7 @@ class Sidebar:
             '将预览参数应用到：\n'+self.source.get_path_name()+'\n\n所有引用此实例的效果都会立即更新。此步不写入磁盘；关闭开关不会撤销已应用的修改。是否继续？'):
             self.refresh();return False
         if value:
+            storage.content_path(self.source.get_path_name())
             if not preview.native().VFX_MaterialCopy(self.material.get_path_name(),self.source.get_path_name()):raise RuntimeError('应用原材质失败。')
         else:self.state['draft']=self.draft(self.source)
         self.state['live']=bool(value);self.attached=False;self.refresh()
@@ -84,14 +85,15 @@ class Sidebar:
     def flush(self):pass  # Native property handles immediately update the active editing object.
 
     def tick(self):
-        self.panel.ensure_layout();dll=preview.native()
-        if self.attached and dll.VFX_MaterialRevision(self.host_path)<0:self.attached=False
+        if not self.panel.layout_attached:self.panel.ensure_layout()
+        dll=preview.native();revision=dll.VFX_MaterialRevision(self.host_path) if self.attached else -1
+        if revision<0:self.attached=False
         if not self.attached:
             if not dll.VFX_MaterialDetails(self.host_path,self.material.get_path_name() if self.material else ''):
                 raise RuntimeError('无法创建 UE 原生材质细节栏。')
             self.attached=True;self.revision=dll.VFX_MaterialRevision(self.host_path)
             if self.show_hidden:dll.VFX_MaterialRefresh(self.host_path,1)
-        revision=dll.VFX_MaterialRevision(self.host_path)
+            revision=self.revision
         if revision!=self.revision:
             self.revision=revision
             if self.state:self.mark_changed()
@@ -126,6 +128,7 @@ class Sidebar:
         if mode=='replace' and not self.can_replace():raise ValueError('母材质不能被实例覆盖，请选择新增实例。')
         if mode=='replace':path=self.source.get_path_name().split('.')[0]
         else:path=new_path or self.new_path()
+        storage.content_path(path)
         if mode=='new':
             folder,name=path.rsplit('/',1)
             if engine.new_asset_path(self.panel.settings,folder,name)!=path:raise ValueError('该名称已被使用，请重新打开保存窗口并更改名称。')
@@ -135,6 +138,7 @@ class Sidebar:
         if not confirmed and not self.panel.confirm(title,path+'\n\n'+detail+'\n仅保存这个实例，不保存模型、母材质、关卡或其他资产。是否继续？'):
             return self.cancel_save()
         try:
+            storage.content_path(path)
             target=self.source
             if mode=='new':
                 folder,name=path.rsplit('/',1)

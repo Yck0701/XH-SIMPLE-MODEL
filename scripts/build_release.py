@@ -49,7 +49,7 @@ def main():
     zip_tree(bundle,launcher,'VFXMeshLauncher')
     base=f'https://github.com/{REPOSITORY}/releases/download/vfx-v{VERSION}/'
     feed={'schema':1,'product':'VFXMeshGenerator','repository':REPOSITORY,'engine':'5.8','minimum_launcher':'1.2.0',
-        'notes':'模型保存按钮移到左侧“保存位置”下方，与目录和名称集中显示；折叠路径设置后仍可保存。生成模型与导入资产使用同一位置的保存入口，继续保留确认弹窗和仅保存目标资产的行为。1.5.0 升级支持热更新，更早版本请先保存工作并关闭工程。'}
+        'notes':'稳定性修复：原生适配组件统一使用 UE 内存分配器，修复旧预览回收崩溃；释放旧面板事件和视图。材质预览复用网格，减少重复生成与引擎文件校验。增加回调防重入和工程写入路径检查，阻断链接目录写入。此次包含原生组件与通信更新，请保存自己的工作并关闭工程后安装。'}
     for key,file in [('plugin',plugin),('launcher',launcher)]:
         feed[key]={'version':VERSION,'url':base+file.name,'sha256':core.digest(file),'size':file.stat().st_size}
     core.validate_feed(feed);core.write_json(release/'vfx-manifest.json',feed)

@@ -2,6 +2,7 @@
 import datetime
 import unreal
 from .settings_types import VFXImportedModelSettings
+from . import storage
 
 FIELDS=('model','use_animation','animation','playing','looping','play_rate')
 
@@ -50,10 +51,11 @@ class Sidebar:
         folder=str(p.folder.get_text()).rstrip('/')+'/Import_'+datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
         suffix=1;base=folder
         while unreal.EditorAssetLibrary.does_directory_exist(folder):folder=base+'_'+str(suffix);suffix+=1
+        storage.content_path(folder)
         if not p.confirm('确认导入自定义模型','打开 UE 原生导入窗口，导入到新目录：\n'+folder+'\n\n可在导入设置中选择骨骼网格与动画。不会覆盖原目录中的模型。是否继续？'):return
         assets=list(unreal.AssetToolsHelpers.get_asset_tools().import_assets_with_dialog(folder))
         if not assets:return
-        assets=[unreal.load_asset(path) for path in unreal.EditorAssetLibrary.list_assets(folder,recursive=True,include_folder=False)]
+        assets=[asset for path in unreal.EditorAssetLibrary.list_assets(folder,recursive=True,include_folder=False) if (asset:=unreal.load_asset(path))]
         # Track exactly the returned new assets; never use Save All.
         p.imported_assets=[a for a in assets if a.get_path_name().startswith(folder+'/')]
         models=[a for a in assets if isinstance(a,(unreal.StaticMesh,unreal.SkeletalMesh))]

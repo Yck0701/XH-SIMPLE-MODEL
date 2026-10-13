@@ -2,7 +2,7 @@
 import json
 import re
 import unreal
-from . import geometry
+from . import geometry,storage
 
 TAG = 'VFXMeshGenerator.Settings'
 SCHEMA = 1
@@ -49,6 +49,7 @@ def new_asset_path(settings, folder, name=None):
     if not re.fullmatch(r'[A-Za-z_\u4e00-\u9fff][A-Za-z0-9_\u4e00-\u9fff]*', name):
         raise ValueError('模型名称请使用中文、字母、数字、下划线，且不能以数字开头。')
     path, _ = unreal.AssetToolsHelpers.get_asset_tools().create_unique_asset_name(folder + '/' + name, '')
+    storage.content_path(path)
     return path
 
 
@@ -66,9 +67,10 @@ def create(settings, folder='/Game/VFXMeshes', name=None, surface=None):
     return mesh, stats
 
 
-def update(mesh, settings, surface=None):
+def update(mesh, settings, surface=None, prepared=None):
+    storage.content_path(mesh.get_path_name())
     read(mesh)  # Refuse destructive changes to arbitrary user assets.
-    dynamic, stats = dynamic_mesh(settings)
+    dynamic, stats = prepared if prepared is not None else dynamic_mesh(settings)
     nanite = unreal.MeshNaniteSettings(enabled=False)
     options = unreal.GeometryScriptCopyMeshToAssetOptions(
         emit_transaction=True, enable_recompute_normals=False,
@@ -84,6 +86,7 @@ def update(mesh, settings, surface=None):
 
 
 def save(mesh):
+    storage.content_path(mesh.get_path_name())
     read(mesh)
     if not mesh.get_path_name().startswith('/Game/'):
         raise ValueError('只允许保存当前工程 Content 下的模型。')

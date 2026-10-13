@@ -4,7 +4,7 @@ import ctypes
 import time
 import traceback
 import unreal
-from . import geometry, engine, preview, material_sidebar, environment_sidebar, model_sidebar
+from . import geometry, engine, preview, material_sidebar, environment_sidebar, model_sidebar, storage
 
 WIDGET='/VFXMeshGenerator/UI/EUW_VFXMesh'
 TAB='VFXMeshGenerator.Workspace'
@@ -13,6 +13,7 @@ _watch=None
 _blueprint=None
 _next_tab_check=0.
 _tab_open=False
+_ticking=False
 
 
 from .settings_types import VFXUserMaterialSettings
@@ -25,6 +26,7 @@ class Panel:
         self.surface={'mode':'custom','material':''};self.live=True;self.loading=True
         self.pending=None;self.geometry_dirty=False;self.surface_dirty=False
         self.history=[];self.last_applied=None;self.unsaved=False
+        self.busy=False;self.last_error=None
         self.controls={};self.rows={};self.refs=[]
         self.sections={};self.left_visible=True;self.right_visible=True;self.sidebar_tab='material'
         self.layout_attached=False;self.layout_sizes=[.21,.54,.25]
@@ -84,9 +86,28 @@ class Panel:
         b.on_clicked.add_callable(lambda:self.safe(action));self.add(parent,b,2);return b
 
     def safe(self,action):
-        try:return action()
+        if self.busy:return
+        self.busy=True
+        try:
+            result=action();self.last_error=None;return result
         except Exception as error:
-            self.pending=None;self.status.set_text(str(error));unreal.log_warning('[VFX Mesh] '+traceback.format_exc())
+            self.pending=None;self.status.set_text(str(error))
+            if str(error)!=self.last_error:unreal.log_warning('[VFX Mesh] '+traceback.format_exc())
+            self.last_error=str(error)
+        finally:self.busy=False
+
+    def dispose(self):
+        dll=preview.native()
+        for host in (self.viewer.host,self.material_sidebar.host,self.columns):
+            dll.VFX_ReleaseHost(host.get_path_name())
+        # UMG delegates hold Python closures. Break those references after the
+        # new panel has copied state, so old widget trees can be collected.
+        for widget in self.refs:
+            for name in ('on_clicked','on_value_changed','on_selection_changed',
+                         'on_check_state_changed','on_property_changed'):
+                delegate=getattr(widget,name,None)
+                if delegate is not None:delegate.clear()
+        self.refs.clear()
 
     def row(self,parent,label,width=120):
         row=self.obj(unreal.HorizontalBox);self.add(parent,row,1)
@@ -307,7 +328,7 @@ class Panel:
         return unreal.EditorDialog.show_message(title,message,unreal.AppMsgType.YES_NO,unreal.AppReturnType.NO)==unreal.AppReturnType.YES
 
     def can_switch(self):
-        return not (self.unsaved or self.geometry_dirty or self.surface_dirty) or self.confirm('切换模型','当前模型有未保存的修改。继续切换？\n本操作不会自动保存任何资产。')
+        return not (self.unsaved or self.geometry_dirty or self.surface_dirty or self.imported_assets) or self.confirm('切换模型','当前模型或本次导入资产有未保存的修改。继续切换？\n本操作不会自动保存任何资产。')
 
     def new(self):
         if not self.can_switch():return
@@ -361,11 +382,12 @@ class Panel:
             self.viewer.update(self.settings,self.preview_material());self.surface_dirty=False;self.unsaved=False
             self.status.set_text('自定义模型预览已更新。原网格未改动。');return
         if self.mesh:
-            if self.geometry_dirty:engine.update(self.mesh,self.settings,self.surface)
+            storage.content_path(self.mesh.get_path_name())
+            if self.geometry_dirty:engine.update(self.mesh,self.settings,self.surface,prepared=self.viewer.prepare(self.settings))
             if self.surface_dirty:
                 with unreal.ScopedEditorTransaction('特效网格：设置当前模型材质'):
                     self.mesh.modify();self.mesh.set_material(0,material)
-            if self.geometry_dirty or self.surface_dirty:engine.write_settings(self.mesh,self.settings,self.surface)
+            if self.surface_dirty and not self.geometry_dirty:engine.write_settings(self.mesh,self.settings,self.surface)
         current=self.snapshot()
         if record and self.last_applied and current!=self.last_applied:
             self.history.append(self.last_applied);self.history=self.history[-20:]
@@ -394,6 +416,7 @@ class Panel:
         if self.custom_mesh:
             assets=list(self.imported_assets)
             if not assets:raise ValueError('当前为已有自定义模型的预览，无需重新保存网格。材质参数请在右侧单独保存。')
+            for asset in assets:storage.content_path(asset.get_path_name())
             paths='\n'.join(a.get_path_name() for a in assets)
             if not self.confirm('确认保存本次导入资产','仅保存本次导入的以下资产：\n'+paths+'\n\n不会保存关卡或其他脏资产。是否继续？'):return False
             for asset in assets:
@@ -419,7 +442,7 @@ class Panel:
     def tick(self):
         self.ensure_layout()
         now=time.monotonic();dt=min(now-self.last_tick,.1);self.last_tick=now
-        if self.pending is not None and now>=self.pending:self.safe(self.apply)
+        if self.pending is not None and now>=self.pending:self.apply()
         self.material_sidebar.tick()
         self.viewer.tick(dt)
         self.environment_sidebar.tick()
@@ -464,11 +487,13 @@ def open_panel():
     _blueprint=bp;_tab_open=True
     if _panel is None or _panel.widget!=widget:
         old=_panel;_panel=Panel(widget)
-        if old:_restore(_panel,old)
+        if old:
+            _restore(_panel,old)
+            if hasattr(old,'dispose'):old.dispose()
     return _panel
 
 
-def _tick(_):
+def _tick_impl():
     global _panel,_next_tab_check,_tab_open
     if _blueprint and time.monotonic()>=_next_tab_check:
         _next_tab_check=time.monotonic()+.5
@@ -476,11 +501,21 @@ def _tick(_):
         _tab_open=bool(widget)
         if widget and (_panel is None or widget!=_panel.widget):
             old=_panel;_panel=Panel(widget)
-            if old:_restore(_panel,old)
+            if old:
+                _restore(_panel,old)
+                if hasattr(old,'dispose'):old.dispose()
         if not widget and _panel:
             _panel.pending=None
             if hasattr(_panel,'material_sidebar'):_panel.safe(_panel.material_sidebar.flush)
     if _panel and _tab_open:_panel.safe(_panel.tick)
+
+
+def _tick(_):
+    global _ticking
+    if _ticking or (_panel and _panel.busy):return
+    _ticking=True
+    try:_tick_impl()
+    finally:_ticking=False
 
 
 def startup():

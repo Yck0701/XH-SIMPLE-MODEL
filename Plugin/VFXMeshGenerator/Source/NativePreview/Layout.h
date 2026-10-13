@@ -21,6 +21,7 @@ extern "C" __declspec(dllexport) int VFX_Layout(const wchar_t* HostPath,const wc
     auto* Host=FindObject<UNativeWidgetHost>(nullptr,HostPath);
     auto* Left=FindObject<UWidget>(nullptr,LeftPath);auto* Center=FindObject<UWidget>(nullptr,CenterPath);auto* Right=FindObject<UWidget>(nullptr,RightPath);
     if(!Host || !Left || !Center || !Right)return 0;
+    for(auto It=Layouts.CreateIterator();It;++It)if(!It.Value().IsValid())It.RemoveCurrent();
     auto Splitter=SNew(SVFXLayout,Left,Center,Right).Orientation(Orient_Horizontal).PhysicalSplitterHandleSize(6).HitDetectionSplitterHandleSize(10)
         +SSplitter::Slot().Value(float(Sizes[0])).MinSize(300)[Left->TakeWidget()]
         +SSplitter::Slot().Value(float(Sizes[1])).MinSize(360)[Center->TakeWidget()]

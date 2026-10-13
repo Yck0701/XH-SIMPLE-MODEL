@@ -307,6 +307,7 @@ extern "C" __declspec(dllexport) int VFX_MaterialDetails(const wchar_t* HostPath
 {
     if(!IsInGameThread())return 0;
     auto* Host=FindObject<UNativeWidgetHost>(nullptr,HostPath);if(!Host)return 0;
+    for(auto It=MaterialViews.CreateIterator();It;++It)if(!It.Value().IsValid())It.RemoveCurrent();
     auto* Existing=MaterialViews.Find(HostPath);auto View=Existing?Existing->Pin():nullptr;
     if(!View){View=SNew(SVFXMaterialDetails);Host->SetContent(View.ToSharedRef());MaterialViews.Add(HostPath,View);}
     auto* Material=FindObject<UMaterialInstanceConstant>(nullptr,MaterialPath);

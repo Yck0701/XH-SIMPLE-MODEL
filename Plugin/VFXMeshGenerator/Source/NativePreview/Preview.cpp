@@ -22,6 +22,12 @@
 #include "MaterialDetails.h"
 #include "Environment.h"
 #include "Layout.h"
+#include "Modules/Boilerplate/ModuleBoilerplate.h"
+
+// This adapter is loaded directly rather than through IMPLEMENT_MODULE.
+// Inline engine code (for example FRotationConversionCache) can allocate here
+// and be destroyed by Engine.dll. Both sides must use UE's allocator.
+REPLACEMENT_OPERATOR_NEW_AND_DELETE
 
 class FVFXViewportClient : public FEditorViewportClient
 {
@@ -159,9 +165,13 @@ public:
     {
         if(External){Scene->RemoveComponent(External);External=nullptr;}
         Mesh->SetVisibility(true);Mesh->SetCastShadow(CastShadow);
-        Mesh->SetDynamicMesh(Dynamic);Mesh->SetMaterial(0,Material?Material:UMaterial::GetDefaultMaterial(MD_Surface));
-        Mesh->UpdateBounds();Mesh->MarkRenderStateDirty();VFXClient->MeshBox=Mesh->Bounds.GetBox();
-        SetEdges(Dynamic);
+        if(Mesh->GetDynamicMesh()!=Dynamic)
+        {
+            Mesh->SetDynamicMesh(Dynamic);Mesh->UpdateBounds();
+            SetEdges(Dynamic);
+        }
+        Mesh->SetMaterial(0,Material?Material:UMaterial::GetDefaultMaterial(MD_Surface));
+        VFXClient->MeshBox=Mesh->Bounds.GetBox();
         Scene->MeshBottom=float(VFXClient->MeshBox.Min.Z);Scene->PlaceFloor();
         if(bFrame)VFXClient->Focus();Invalidate();
     }
@@ -195,6 +205,16 @@ public:
 };
 
 static TMap<FString,TWeakPtr<SVFXNativeViewport>> Viewports;
+extern "C" __declspec(dllexport) int VFX_ReleaseHost(const wchar_t* HostPath)
+{
+    if(!IsInGameThread())return 0;
+    auto* Host=FindObject<UNativeWidgetHost>(nullptr,HostPath);if(!Host)return 0;
+    // Tear down preview worlds and details while the editor is in a normal
+    // tick, before UObject GC starts destroying the old UMG wrapper tree.
+    Host->SetContent(SNullWidget::NullWidget);
+    Viewports.Remove(HostPath);MaterialViews.Remove(HostPath);Layouts.Remove(HostPath);
+    return 1;
+}
 // Python editing APIs identify global parameters by name only. Reject ambiguous
 // names and layer parameters so an edit cannot target a different parameter.
 extern "C" __declspec(dllexport) int VFX_GlobalParameter(const wchar_t* MaterialPath,int Kind,const wchar_t* Name)
@@ -218,6 +238,7 @@ extern "C" __declspec(dllexport) int VFX_Attach(const wchar_t* HostPath)
 {
     if(!IsInGameThread())return 0;
     auto* Host=FindObject<UNativeWidgetHost>(nullptr,HostPath);if(!Host)return 0;
+    for(auto It=Viewports.CreateIterator();It;++It)if(!It.Value().IsValid())It.RemoveCurrent();
     auto Widget=SNew(SVFXNativeViewport);Host->SetContent(Widget);Viewports.Add(HostPath,Widget);
     if(auto Cached=Host->GetCachedWidget())
     {

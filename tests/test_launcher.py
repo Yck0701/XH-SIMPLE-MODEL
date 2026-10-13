@@ -113,6 +113,29 @@ class LauncherTests(unittest.TestCase):
         core.write_json(self.project,{'Plugins':[{'Name':'PythonScriptPlugin','Enabled':False}]})
         with self.assertRaises(ValueError):self.install()
 
+    def test_multiple_projects_and_partial_copy_failure_remain_isolated(self):
+        bystander=self.root/'OtherProject';bystander.mkdir()
+        protected=[self.project,self.root/'Content/Keep.uasset',self.root/'Config/DefaultEngine.ini',
+                   self.root/'Source/Keep.cpp',self.root/'Plugins/OtherPlugin/Keep.uplugin',
+                   bystander/'Other.uproject',bystander/'Content/Keep.uasset']
+        for path in protected[1:]:path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b'unchanged')
+        baseline={path:path.read_bytes() for path in protected}
+        self.install();old=core.inventory(core.project_info(self.project)['plugin'])
+        for _ in range(3):
+            info=self.state();archive,item=self.package('1.2.0',script='second')
+            original=core._copy_atomic;calls=[]
+            def fail_once(source,target):
+                original(source,target);calls.append(target)
+                if len(calls)==1:raise OSError('interrupted after first file')
+            with patch.object(core,'_copy_atomic',side_effect=fail_once):
+                with self.assertRaises(OSError):core.install(self.project,archive,item,editor_probe=lambda _:[123],ipc=lambda *a,**k:None)
+            self.assertEqual(core.inventory(info['plugin']),old)
+            self.assertEqual({p:p.read_bytes() for p in protected},baseline)
+            self.install('1.2.0',script='second')
+            core.restore_backup(self.project,editor_probe=lambda _:[])
+            self.assertEqual(core.inventory(info['plugin']),old)
+            self.assertEqual({p:p.read_bytes() for p in protected},baseline)
+
     def test_native_engine_mismatch_leaves_plugin_unchanged(self):
         self.install()
         project_before=self.project.read_bytes()

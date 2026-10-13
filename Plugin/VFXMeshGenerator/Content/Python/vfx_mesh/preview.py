@@ -6,7 +6,9 @@ from pathlib import Path
 import unreal
 from . import engine,geometry
 
-_dll=None
+# importlib.reload retains module globals. The loaded DLL cannot change in this
+# editor process; validate it once, then retain the verified handle on reload.
+_dll=globals().get('_dll')
 
 
 def _hash(path):
@@ -29,6 +31,7 @@ def native():
     file=folder/'VFXNativePreview.dll'
     if _hash(file)!=manifest['dll_sha256']:raise RuntimeError('预览组件校验失败，请重新安装插件。')
     dll=ctypes.CDLL(str(file))
+    dll.VFX_ReleaseHost.argtypes=[ctypes.c_wchar_p];dll.VFX_ReleaseHost.restype=ctypes.c_int
     for name,signature in [('VFX_Attach',[ctypes.c_wchar_p]),('VFX_SetMesh',[ctypes.c_wchar_p]*3+[ctypes.c_int]),
                           ('VFX_Options',[ctypes.c_wchar_p]+[ctypes.c_int]*5),('VFX_Focus',[ctypes.c_wchar_p]),
                           ('VFX_Camera',[ctypes.c_wchar_p,ctypes.POINTER(ctypes.c_double)])]:
@@ -59,6 +62,7 @@ class Preview:
         self.cast_shadow=True;self.last_shadow=None
         self.custom_asset=None;self.component=None;self.component_asset=None;self.animation_state=None;self.last_animation=None
         self.settings=geometry.defaults();self.material=None;self.dynamic=None;self.last_flags=None
+        self.built_settings=None;self.stats=None
         self.host=panel.obj(unreal.NativeWidgetHost)
         slot=panel.add(parent,self.host,0);slot.set_size(unreal.SlateChildSize(size_rule=unreal.SlateSizeRule.FILL))
         self.path=self.host.get_path_name();self.dll=None;self.error=False
@@ -74,6 +78,12 @@ class Preview:
                 raise ValueError('动画和模型的骨架不一致，请选择同骨架动画或先在 UE 中重定向。')
         self.animation_state=state
 
+    def prepare(self,settings):
+        if self.dynamic is None or self.built_settings!=settings:
+            dynamic,stats=engine.dynamic_mesh(settings)
+            self.dynamic=dynamic;self.stats=stats;self.built_settings=dict(settings)
+        return self.dynamic,self.stats
+
     def rewind(self):
         if isinstance(self.component,unreal.SkeletalMeshComponent):self.component.set_position(0.,False)
 
@@ -81,6 +91,7 @@ class Preview:
         asset=self.custom_asset
         if self.component_asset!=asset:
             self.component_asset=asset;self.last_animation=None
+            self.built_settings=None
             if isinstance(asset,unreal.StaticMesh):
                 self.component=unreal.new_object(unreal.StaticMeshComponent)
                 self.component.set_static_mesh(asset)
@@ -107,7 +118,7 @@ class Preview:
 
     def tick(self,dt):
         if self.error:return
-        self.panel.ensure_layout()
+        if not self.panel.layout_attached:self.panel.ensure_layout()
         if self.attached and self.camera() is None:
             # UMG can release and rebuild Slate resources during editor changes.
             # Reattach without losing the local environment or model settings.
@@ -124,7 +135,7 @@ class Preview:
         if self.dirty:
             if self.custom_asset:self.custom_preview()
             else:
-                self.dynamic,stats=engine.dynamic_mesh(self.settings)
+                self.dynamic,stats=self.prepare(self.settings)
                 if not self.dll.VFX_SetMesh(self.path,self.dynamic.get_path_name(),self.material.get_path_name() if self.material else '',int(self.frame_next)):
                     raise RuntimeError('预览网格更新失败。')
                 self.component=None;self.component_asset=None;self.last_animation=None

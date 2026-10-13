@@ -1,7 +1,7 @@
 {
   "FileVersion": 3,
-  "Version": 151,
-  "VersionName": "1.5.1",
+  "Version": 152,
+  "VersionName": "1.5.2",
   "FriendlyName": "VFX 特效网格生成器",
   "Description": "在编辑器内实时调整九种特效网格，直接更新 Niagara 使用的静态网格资产。",
   "Category": "Editor",

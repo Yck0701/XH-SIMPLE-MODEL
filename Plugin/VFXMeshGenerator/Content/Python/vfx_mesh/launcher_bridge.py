@@ -6,10 +6,13 @@ from pathlib import Path
 import time
 import uuid
 import unreal
+from . import storage
 
 PROTOCOL = 1
 _handle = None
 _last_tick = 0.
+_last_heartbeat = 0.
+_busy = False
 _session = uuid.uuid4().hex
 _seen = set()
 _open_on_start = False
@@ -19,8 +22,10 @@ _directory = Path(unreal.Paths.project_saved_dir()).resolve() / 'VFXMeshGenerato
 
 
 def _write(path, value):
+    storage.project_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix('.tmp-' + str(os.getpid()))
+    storage.project_path(temporary)
     temporary.write_text(json.dumps(value, ensure_ascii=False), encoding='utf-8')
     os.replace(temporary, path)
 
@@ -43,19 +48,20 @@ def _reload():
         unreal.unregister_slate_post_tick_callback(runtime._watch)
         runtime._watch = None
     importlib.invalidate_caches()
-    for module in (geometry, engine, preview, material_sidebar, environment_sidebar, model_sidebar, runtime):
+    for module in (storage, geometry, engine, preview, material_sidebar, environment_sidebar, model_sidebar, runtime):
         importlib.reload(module)
     runtime.startup()
     if old:
         panel = runtime.open_panel()
         runtime._restore(panel, old)
+        if hasattr(old,'dispose'):old.dispose()
         panel.status.set_text('插件已热更新，当前模型与未保存参数已保留。')
     _loaded_version = _version()
     _recovery_panel = None
 
 
-def _tick(_):
-    global _last_tick, _open_on_start
+def _tick_impl():
+    global _last_tick, _last_heartbeat, _open_on_start
     if time.monotonic() - _last_tick < .75: return
     _last_tick = time.monotonic()
     try:
@@ -63,15 +69,19 @@ def _tick(_):
             _open_on_start = False
             from .runtime import open_panel
             open_panel()
-        _write(_directory/'editor.json', {'protocol':PROTOCOL, 'pid':os.getpid(),
-            'session':_session, 'time':time.time(), 'version':_loaded_version,
-            'plugin_dir':str(_root)})
+        if time.monotonic()-_last_heartbeat>=3:
+            _write(_directory/'editor.json', {'protocol':PROTOCOL, 'pid':os.getpid(),
+                'session':_session, 'time':time.time(), 'version':_loaded_version,
+                'plugin_dir':str(_root)})
+            _last_heartbeat=time.monotonic()
         request_file = _directory/'request.json'
         if not request_file.is_file() or request_file.stat().st_size > 4096: return
         packet = json.loads(request_file.read_text(encoding='utf-8'))
         identity = packet.get('id','')
         if packet.get('session') != _session or identity in _seen or not identity: return
         if packet.get('protocol') != PROTOCOL or abs(time.time()-packet.get('time',0)) > 60: return
+        from . import runtime
+        if runtime._ticking or (runtime._panel and runtime._panel.busy):return
         _seen.add(identity)
         if len(_seen) > 100: _seen.clear(); _seen.add(identity)
         result = {'id':identity, 'session':_session, 'time':time.time(), 'ok':False}
@@ -90,6 +100,14 @@ def _tick(_):
         _write(_directory/'response.json', result)
     except (OSError, ValueError, TypeError):
         pass  # A concurrently replaced file is retried next tick.
+
+
+def _tick(_):
+    global _busy
+    if _busy:return
+    _busy=True
+    try:_tick_impl()
+    finally:_busy=False
 
 
 def startup():
