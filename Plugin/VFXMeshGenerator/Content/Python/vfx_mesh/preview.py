@@ -4,7 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import unreal
-from . import engine,geometry
+from . import engine,geometry,native_profiles
 
 # importlib.reload retains module globals. The loaded DLL cannot change in this
 # editor process; validate it once, then retain the verified handle on reload.
@@ -22,12 +22,13 @@ def native():
     global _dll
     if _dll:return _dll
     root=Path(unreal.Paths.engine_dir()).resolve()
-    build=json.loads((root/'Binaries/Win64/UnrealEditor.modules').read_text())['BuildId']
-    folder=Path(__file__).resolve().parents[3]/'Native/Win64'/build
-    if not (folder/'manifest.json').is_file():raise RuntimeError('此引擎暂未包含匹配的原生预览组件，请更新插件或为当前引擎构建适配组件。')
+    native_root=Path(__file__).resolve().parents[3]/'Native/Win64'
+    report=native_profiles.inspect(root,native_root,hash_file=_hash)
+    if not report['compatible']:
+        current=report['engine_version'];number='.'.join(str(current.get(k,'?')) for k in ('MajorVersion','MinorVersion','PatchVersion'))
+        raise RuntimeError('当前 UE '+number+' / 构建号 '+str(current.get('Changelist','?'))+' 没有匹配的已验证预览组件。请在启动器“检测兼容性”查看目标版本与解决方案。')
+    folder=native_root/report['profile']
     manifest=json.loads((folder/'manifest.json').read_text())
-    for name,checksum in manifest['engine_sha256'].items():
-        if _hash(root/name)!=checksum:raise RuntimeError('引擎组件与已验证的预览版本不匹配，请重新构建适配组件。')
     file=folder/'VFXNativePreview.dll'
     if _hash(file)!=manifest['dll_sha256']:raise RuntimeError('预览组件校验失败，请重新安装插件。')
     dll=ctypes.CDLL(str(file))

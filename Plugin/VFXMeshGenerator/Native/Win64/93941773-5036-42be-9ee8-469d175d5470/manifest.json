@@ -13,5 +13,12 @@
     "Binaries/Win64/UnrealEditor-MaterialEditor.dll": "74893d51315a1e211531a17fc01d3cf768e8094cb1a73c1da87f4528fa752194",
     "Binaries/Win64/UnrealEditor-PropertyEditor.dll": "d8949e2b5dc62b31f730fc5f2d9a01a24345fe656b567f49bbf9f20d4915f2a3"
   },
-  "dll_sha256": "78c9399e2ff68017eec0bc829804bad16b3f9b8e3dbc1856507466f7df8e176b"
+  "dll_sha256": "78c9399e2ff68017eec0bc829804bad16b3f9b8e3dbc1856507466f7df8e176b",
+  "engine_version": {
+    "MajorVersion": 5,
+    "MinorVersion": 8,
+    "PatchVersion": 3,
+    "Changelist": 0,
+    "CompatibleChangelist": 55116800
+  }
 }

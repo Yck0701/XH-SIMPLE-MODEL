@@ -28,6 +28,7 @@ def main():
     descriptor=core.read_json(ROOT/'Plugin/VFXMeshGenerator/VFXMeshGenerator.uplugin')
     versions=core.read_json(ROOT/'version.json')
     assert descriptor['VersionName']==versions['version']==versions['plugin_version']==VERSION
+    assert (ROOT/'Launcher/native_profiles.py').read_bytes()==(ROOT/'Plugin/VFXMeshGenerator/Content/Python/vfx_mesh/native_profiles.py').read_bytes(), 'Shared profile selectors differ'
     release=ROOT/'release'/VERSION;release.mkdir(parents=True,exist_ok=True)
     plugin=release/f'VFXMeshGenerator-{VERSION}-UE5.8.zip'
     zip_tree(ROOT/'Plugin/VFXMeshGenerator',plugin,'VFXMeshGenerator')
@@ -42,14 +43,20 @@ def main():
     shutil.copy2(plugin,offline/plugin.name)
     plugin_item={'version':VERSION,'sha256':core.digest(plugin),'size':plugin.stat().st_size,'file':plugin.name}
     core.write_json(offline/'manifest.json',{'schema':1,'plugin':plugin_item})
+    compiler=bundle/'compiler';compiler.mkdir(exist_ok=True)
+    shutil.copytree(ROOT/'scripts/CompilerHost',compiler/'CompilerHost',dirs_exist_ok=True)
+    shutil.copytree(ROOT/'scripts/RulesHelper',compiler/'RulesHelper',dirs_exist_ok=True)
+    shutil.copy2(ROOT/'scripts/verify_native.py',compiler/'verify_native.py')
+    core.write_json(compiler/'manifest.json',{'files':{
+        p.relative_to(compiler).as_posix():core.digest(p) for p in compiler.rglob('*') if p.is_file() and p.name!='manifest.json'}})
     shutil.copy2(ROOT/'docs/使用教学.html',bundle/'使用教学.html')
     shutil.copy2(ROOT/'version.json',bundle/'version.json')
     (bundle/'先读我.txt').write_text('完整解压后，双击 VFX特效网格启动器.exe。\n选择 .uproject → 安装插件 → 重启 UE → 特效网格 → 打开独立工作台。\n请保留 _internal 与 offline 目录。详细步骤见 使用教学.html。\n',encoding='utf-8-sig')
     launcher=release/f'VFXMeshLauncher-{VERSION}-Windows.zip'
     zip_tree(bundle,launcher,'VFXMeshLauncher')
     base=f'https://github.com/{REPOSITORY}/releases/download/vfx-v{VERSION}/'
-    feed={'schema':1,'product':'VFXMeshGenerator','repository':REPOSITORY,'engine':'5.8','minimum_launcher':'1.2.0',
-        'notes':'新增只读兼容性检测与差异报告，保留 BuildId 和 DLL 校验，逐类给出解决方案。更新检查与下载增加 GitHub 官方备用通道和重试；网络失败显示原因，支持内置离线安装和浏览器下载。本版原生组件与 1.5.2 相同；从 1.5.1 或更早版本升级仍需关闭对应工程。'}
+    feed={'schema':1,'product':'VFXMeshGenerator','repository':REPOSITORY,'engine':'5.8','minimum_launcher':'1.5.4',
+        'notes':'新增本机编译适配：携带原生源码与构建附件，使用所选 UE 的开发文件，独立空工程验证通过后再确认安装。按具体版本和 DLL 指纹隔离适配组件，支持同 BuildId 的不同构建；保留兼容性检查。新增引擎规则缓存缺失时的独立重建。官方与更新后的公司 UE 5.8.3 已验证，包含对应组件；UE 5.8.2 需在目标电脑编译验证。本次升级需要关闭对应工程。'}
     for key,file in [('plugin',plugin),('launcher',launcher)]:
         feed[key]={'version':VERSION,'url':base+file.name,'sha256':core.digest(file),'size':file.stat().st_size}
     core.validate_feed(feed);core.write_json(release/'vfx-manifest.json',feed)

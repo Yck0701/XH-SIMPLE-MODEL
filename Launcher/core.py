@@ -19,6 +19,7 @@ import urllib.request
 import uuid
 import zipfile
 from version import VERSION, REPOSITORY
+import native_profiles
 
 PLUGIN = 'VFXMeshGenerator'
 API = 'https://api.github.com/repos/' + REPOSITORY
@@ -272,28 +273,18 @@ def validate_engine(path):
 def native_compatibility(engine_path, native_root):
     """Read-only comparison. Drive letters never participate in fingerprints."""
     root=validate_engine(engine_path).parents[2]
-    version=read_json(root/'Build/Build.version')
-    build=read_json(root/'Binaries/Win64/UnrealEditor.modules')['BuildId']
-    if not isinstance(build,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',build):raise ValueError('引擎 BuildId 无效。')
-    native_root=Path(native_root)
-    report={'build_id':build,'engine_version':{k:version.get(k) for k in ('MajorVersion','MinorVersion','PatchVersion','Changelist','CompatibleChangelist')},
-            'supported_builds':sorted(p.parent.name for p in native_root.glob('*/manifest.json')),'files':[],'compatible':False}
-    manifest=native_root/build/'manifest.json'
-    if not manifest.is_file():report['reason']='missing_adapter';return report
-    hashes=read_json(manifest)['engine_sha256']
-    if not hashes:raise ValueError('适配组件缺少引擎校验清单。')
-    for name,expected in hashes.items():
-        if not re.fullmatch(r'Binaries/Win64/UnrealEditor-[A-Za-z0-9_-]+\.dll',name):raise ValueError('引擎校验清单路径无效。')
-        if not re.fullmatch(r'[0-9a-f]{64}',expected):raise ValueError('引擎校验指纹无效。')
-        file=root/name;actual=digest(file) if file.is_file() else None
-        report['files'].append({'file':name,'expected_sha256':expected,'actual_sha256':actual,
-                                'status':'match' if actual==expected else 'missing' if actual is None else 'different'})
-    report['compatible']=all(f['status']=='match' for f in report['files'])
-    report['reason']='verified' if report['compatible'] else 'different_files'
-    return report
+    return native_profiles.inspect(root,native_root,hash_file=digest)
+
+
+def engine_version_label(version):
+    if not version:return '未记录（仍按 DLL 指纹检测）'
+    number='.'.join(str(version.get(k,'?')) for k in ('MajorVersion','MinorVersion','PatchVersion'))
+    return 'UE '+number+' / 构建号 '+str(version.get('Changelist','?'))
 
 
 def compatibility_message(report):
+    if report['reason']=='engine_version_mismatch':
+        return '引擎版本与适配组件不一致。\n当前：'+engine_version_label(report['engine_version'])+'\n组件目标：'+engine_version_label(report['expected_engine_version'])+'\n\n相同 BuildId 不代表 DLL 内容相同。请选择项目实际使用的引擎，或为当前构建增加适配。未替换插件或改动项目资产。'
     if report['reason']=='missing_adapter':
         return '此引擎尚无匹配的原生预览组件。\nBuildId：'+report['build_id']+'\n请导出诊断报告以添加适配。未替换插件或改动项目资产。'
     different=[f for f in report['files'] if f['status']!='match']
@@ -304,8 +295,10 @@ def compatibility_message(report):
 def compatibility_solution(report):
     if report['compatible']:
         return '检测通过：引擎 BuildId 与所有必需 DLL 指纹匹配。可安装对应插件；首次安装或原生组件更新前，保存工作并关闭该工程。'
+    if report['reason']=='engine_version_mismatch':
+        return compatibility_message(report)+'\n\n解决方法：\n1. 在启动器选择项目实际使用的 UnrealEditor.exe，再重新检测。\n2. 若项目必须使用当前版本，点击“为当前引擎编译适配”。需要此引擎的完整 C++ 开发文件、MSVC 和 Windows SDK。编译后独立验证通过才能安装。\n无需因为此提示重装或认定引擎文件损坏；不要只替换单个 DLL 或修改 BuildId。'
     if report['reason']=='missing_adapter':
-        return '解决方法：选择工程实际使用的 UnrealEditor.exe；若选择正确，请导出诊断报告，为此构建编译并验证新的原生适配组件。不要修改 BuildId 或复制其他构建的预览 DLL。'
+        return '解决方法：选择工程实际使用的 UnrealEditor.exe；若选择正确，请点击“为当前引擎编译适配”，编译并验证新组件。缺少开发文件时请按提示补齐；编译或验证失败时提供编译日志。不要修改 BuildId 或复制其他构建的预览 DLL。'
     missing=any(f['status']=='missing' for f in report['files'])
     return ('解决方法：先用公司引擎同步工具补齐报告中缺失的文件。\n' if missing else '解决方法：先确认公司引擎的同步批次，以及是否安装过修改引擎 DLL 的补丁。\n')+\
         '请将引擎可执行文件、DLL 和 .modules 文件同步到同一完整构建，再重新检测。不要仅替换单个 DLL。\n'+\

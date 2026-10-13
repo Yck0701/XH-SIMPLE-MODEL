@@ -51,9 +51,11 @@ rsp=out/'compile.rsp';rsp.write_text('\n'.join(lines),encoding='utf-8-sig')
 cmd=out/'build.cmd';cmd.write_text('@echo off\nchcp 65001 >nul\ncall "'+args.vcvars+'" -vcvars_ver=14.50\nif errorlevel 1 exit /b %errorlevel%\ncl @"'+str(rsp)+'"\n',encoding='utf-8')
 subprocess.run(['cmd.exe','/d','/c',str(cmd)],cwd=out,check=True)
 build_id=json.loads((engine/'Binaries/Win64/UnrealEditor.modules').read_text())['BuildId']
-dest=plugin/'Native/Win64'/build_id;dest.mkdir(parents=True,exist_ok=True)
+version=json.loads((engine/'Build/Build.version').read_text())
+profile=str(version['PatchVersion'])+'-'+str(version['Changelist'])+'-'+hashlib.sha256((engine/'Binaries/Win64/UnrealEditor-Core.dll').read_bytes()).hexdigest()[:12]
+dest=plugin/'Native/Win64'/build_id/'variants'/profile;dest.mkdir(parents=True,exist_ok=True)
 shutil.copy2(out/'VFXNativePreview.dll',dest/'VFXNativePreview.dll')
 hashes={f'Binaries/Win64/UnrealEditor-{mod}.dll':hashlib.sha256((engine/f'Binaries/Win64/UnrealEditor-{mod}.dll').read_bytes()).hexdigest()
         for mod in ('Core','CoreUObject','Engine','Slate','SlateCore','UMG','UnrealEd','AdvancedPreviewScene','GeometryFramework','MaterialEditor','PropertyEditor')}
-(dest/'manifest.json').write_text(json.dumps({'build_id':build_id,'engine_sha256':hashes,'dll_sha256':hashlib.sha256((dest/'VFXNativePreview.dll').read_bytes()).hexdigest()},indent=2))
+(dest/'manifest.json').write_text(json.dumps({'build_id':build_id,'engine_version':{key:json.loads((engine/'Build/Build.version').read_text())[key] for key in ('MajorVersion','MinorVersion','PatchVersion','Changelist','CompatibleChangelist')},'engine_sha256':hashes,'dll_sha256':hashlib.sha256((dest/'VFXNativePreview.dll').read_bytes()).hexdigest()},indent=2))
 print('Built '+str(dest))

@@ -1,0 +1,35 @@
+{
+  "build_id": "210891e3-aa60-4f7b-ac84-35d0b26d09fc",
+  "engine_version": {
+    "MajorVersion": 5,
+    "MinorVersion": 8,
+    "PatchVersion": 3,
+    "Changelist": 0,
+    "CompatibleChangelist": 55116800
+  },
+  "engine_sha256": {
+    "Binaries/Win64/UnrealEditor-Core.dll": "500f60a1d243d0e786c59ecf27b2cb757adfc75a817ca323d94f328e5fe67885",
+    "Binaries/Win64/UnrealEditor-CoreUObject.dll": "fb3ab6f6a38187e2617c04261973f6dfe9a1200711c90e49e416c15739049ff9",
+    "Binaries/Win64/UnrealEditor-Engine.dll": "64fbbf7c31f2ac3a14a66a3b8dc9e414a6781c6c6d97b09715f448d829ae3c3c",
+    "Binaries/Win64/UnrealEditor-Slate.dll": "272218456c4ec364c8c77db7f7da5e1597c3825cc1d8b36ed8956b395fb0177b",
+    "Binaries/Win64/UnrealEditor-SlateCore.dll": "ba55ada6a6ddc6a9240637f5fe853352edafbd1ca69750f14e6075a55fad04ed",
+    "Binaries/Win64/UnrealEditor-UMG.dll": "aebb88bc6f74cda3cb68b87db6e934eb5a0dc425d38bf263e415d9311f535d21",
+    "Binaries/Win64/UnrealEditor-UnrealEd.dll": "86563769f9425fc53cda54c237ffcb710caaf494c63b1c16ce3eef938b259fdf",
+    "Binaries/Win64/UnrealEditor-AdvancedPreviewScene.dll": "c11c44a57ec08f1a396bf659e53a0829f8c479de2a5c6936b879828f76db3059",
+    "Binaries/Win64/UnrealEditor-GeometryFramework.dll": "911e115d176189f5237a3a5d57e554cb7029e305220d0eda5c08ce4370e5b452",
+    "Binaries/Win64/UnrealEditor-GeometryCore.dll": "dd3db582ad2c0c955bec08c4cf92db95263f77da01cf313d03f7a173c3b3e744",
+    "Plugins/Runtime/GeometryProcessing/Binaries/Win64/UnrealEditor-DynamicMesh.dll": "2a3e6792795743af49bb431a0b63f39f01d19d82ed55f4d099a6d4a93074708d",
+    "Binaries/Win64/UnrealEditor-RenderCore.dll": "1ebcb8a12c24fc8f7845382c75f6cefaf9377ccc143e1631ec3769971afcd994",
+    "Binaries/Win64/UnrealEditor-RHI.dll": "ee349d9309dedcc57af25e5d12e9e928d6a877d995aad9fc00824f497e64fb74",
+    "Binaries/Win64/UnrealEditor-InputCore.dll": "4769101bb8e345845904c3ee92ec6757925e415959688381e6f7a3aea0b10840",
+    "Binaries/Win64/UnrealEditor-ApplicationCore.dll": "7709d1cd4a46f97e4d05b1aaf19ca00c0a2e7bfbce39fe50decaf3749fc141ff",
+    "Binaries/Win64/UnrealEditor-Projects.dll": "653ee337f8681bf7cebe703c84eed54cd65caad6439296ec8b89b9ea78d31d18",
+    "Binaries/Win64/UnrealEditor-ToolMenus.dll": "ca6557a7afaf7be9332f07c655af6da38a5554efbb450b18e74e94d6f6cc6d85",
+    "Binaries/Win64/UnrealEditor-TraceLog.dll": "636e5d3cbaac2ee98b91540decf561d6e6fad26451b91be492aa5e7637de489d",
+    "Binaries/Win64/UnrealEditor-EditorFramework.dll": "de0c946afaaddbed00715b44f1a6e105dc32df0f04d9f040f91311b7de6d4326",
+    "Binaries/Win64/UnrealEditor-MaterialEditor.dll": "f88347ddf5e98cbd09112c5864534015ee4eccf92815160684131dac57354377",
+    "Binaries/Win64/UnrealEditor-PropertyEditor.dll": "9630a0ae0ea0f453c3b5fd4854b754607573ef0d405a989a39d877bf60c701c6"
+  },
+  "dll_sha256": "63200ba645a437aa01b05b3347d2d8faaa8f222bbfb26ed43048571994197b15",
+  "local_build": true
+}

@@ -13,6 +13,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import webbrowser
 import core
+import native_builder
 from version import VERSION, PRODUCT
 
 BASE=Path(sys.executable).parent if getattr(sys,'frozen',False) else Path(__file__).resolve().parent
@@ -36,13 +37,14 @@ def prefer_updated_launcher():
 
 
 class App(tk.Tk):
-    def __init__(self, initial_project='', auto_check=None):
+    def __init__(self, initial_project='', auto_check=None, initial_engine=''):
         super().__init__();self.title(PRODUCT+'  '+VERSION);self.geometry('1080x810');self.minsize(980,760)
         self.configure(bg=BG)
         self.events=queue.Queue();self.busy=False;self.checking=False;self.closing=False;self.feed=None;self.last_update_error=''
         config=settings()
         self.project=tk.StringVar(value=initial_project or config.get('project',''))
-        self.engine=tk.StringVar(value=config.get('engine',''))
+        self.engine=tk.StringVar(value=initial_engine or config.get('engine',''))
+        self.auto_compat=tk.BooleanVar(value=config.get('auto_compat',True))
         self.auto_check=tk.BooleanVar(value=config.get('auto_check',True) if auto_check is None else auto_check)
         self.status=tk.StringVar(value='选好工程，先安装，再启动。')
         self.installed=tk.StringVar(value='未选择工程')
@@ -55,6 +57,7 @@ class App(tk.Tk):
         self.protocol('WM_DELETE_WINDOW',self.close)
         self._pump_after=self.after(80,self.pump)
         self._check_after=self.after(500,self.check) if self.auto_check.get() else None
+        self._compat_after=self.after(900,self.startup_compatibility) if self.auto_compat.get() else None
 
     def style_ui(self):
         s=ttk.Style(self);s.theme_use('clam')
@@ -102,14 +105,25 @@ class App(tk.Tk):
             b=self.button(sidebar,title,lambda k=key:self.show(k));b.configure(style='Nav.TButton');b.pack(fill='x',pady=3);self.nav[key]=b
         footer=ttk.Frame(sidebar);footer.pack(side='bottom',fill='x')
         self.label(footer,'启动器 '+VERSION,'Muted.TLabel')
-        self.label(footer,'适用 UE 5.8','Muted.TLabel')
+        self.label(footer,'需匹配 UE 构建','Muted.TLabel')
         self.button(footer,'GitHub 仓库 ↗',lambda:webbrowser.open(core.WEB)).pack(fill='x',pady=(12,0))
         main=ttk.Frame(outer);main.pack(side='left',fill='both',expand=True)
-        self.container=ttk.Frame(main);self.container.pack(fill='both',expand=True)
+        self.status_label=ttk.Label(main,textvariable=self.status,wraplength=730,style='Muted.TLabel');self.status_label.pack(side='bottom',fill='x')
+        self.progress=ttk.Progressbar(main,mode='determinate');self.progress.pack(side='bottom',fill='x',pady=(12,8))
+        body=ttk.Frame(main);body.pack(fill='both',expand=True)
+        self.content_canvas=tk.Canvas(body,bg=BG,highlightthickness=0)
+        scroll=ttk.Scrollbar(body,command=self.content_canvas.yview);scroll.pack(side='right',fill='y')
+        self.content_canvas.configure(yscrollcommand=scroll.set);self.content_canvas.pack(side='left',fill='both',expand=True)
+        self.container=ttk.Frame(self.content_canvas)
+        content_window=self.content_canvas.create_window((0,0),window=self.container,anchor='nw')
+        self.content_canvas.bind('<Configure>',lambda event:self.content_canvas.itemconfigure(content_window,width=event.width))
+        self.container.bind('<Configure>',lambda _:self.content_canvas.configure(scrollregion=self.content_canvas.bbox('all')))
+        def wheel(event):
+            if event.widget.winfo_toplevel()==self and self.content_canvas.winfo_rootx()<=event.x_root<=self.content_canvas.winfo_rootx()+self.content_canvas.winfo_width():
+                self.content_canvas.yview_scroll(-int(event.delta/120),'units')
+        self.bind('<MouseWheel>',wheel)
         for key in self.nav:self.pages[key]=ttk.Frame(self.container)
         self.build_home();self.build_updates();self.build_guide();self.build_backup()
-        self.progress=ttk.Progressbar(main,mode='determinate');self.progress.pack(fill='x',pady=(12,8))
-        self.status_label=ttk.Label(main,textvariable=self.status,wraplength=760,style='Muted.TLabel');self.status_label.pack(fill='x')
 
     def build_home(self):
         page=self.pages['home']
@@ -138,6 +152,9 @@ class App(tk.Tk):
         self.label(page,'首次安装需要重启一次 UE，之后兼容的脚本更新可直接热重载。','Muted.TLabel',padding=(0,6))
         self.label(page,'在 Niagara 中把生成的模型指定给 Mesh Renderer 一次，之后即可实时调参。','Muted.TLabel',wraplength=740)
         self.button(page,'第一次用？查看 5 步教学 →',lambda:self.show('guide')).pack(anchor='w',pady=(15,0))
+        row=ttk.Frame(page);row.pack(fill='x',pady=(8,0))
+        self.button(row,'为当前引擎编译适配…',self.compile_adapter,lock=True).pack(side='left')
+        self.button(row,'查看编译日志',self.open_build_logs).pack(side='left',padx=8)
 
     def build_updates(self):
         page=self.pages['updates'];self.label(page,'更新中心','Title.TLabel')
@@ -145,6 +162,7 @@ class App(tk.Tk):
         card=self.card(page);self.label(card,style='CardHeading.TLabel',textvariable=self.update_status,wraplength=730)
         self.label(card,style='CardMuted.TLabel',textvariable=self.check_time,padding=(0,10))
         ttk.Checkbutton(page,text='每次打开启动器，自动检查 GitHub 更新',variable=self.auto_check,command=self.save_settings).pack(anchor='w',pady=(4,14))
+        ttk.Checkbutton(page,text='每次打开启动器，检测所选引擎并询问是否编译适配',variable=self.auto_compat,command=self.save_settings).pack(anchor='w',pady=(0,10))
         row=ttk.Frame(page);row.pack(fill='x')
         self.button(row,'立即检查',self.check).pack(side='left',padx=(0,10))
         self.button(row,'安装 / 更新插件',self.install,accent=True,lock=True).pack(side='left',padx=(0,10))
@@ -186,9 +204,10 @@ class App(tk.Tk):
         for key,page in self.pages.items():
             page.pack_forget();self.nav[key].configure(style='Selected.Nav.TButton' if key==name else 'Nav.TButton')
         self.pages[name].pack(fill='both',expand=True)
+        self.content_canvas.yview_moveto(0)
 
     def save_settings(self):
-        try:core.write_json(STATE/'settings.json',{'project':self.project.get(),'engine':self.engine.get(),'auto_check':self.auto_check.get()})
+        try:core.write_json(STATE/'settings.json',{'project':self.project.get(),'engine':self.engine.get(),'auto_check':self.auto_check.get(),'auto_compat':self.auto_compat.get()})
         except OSError:self.status.set('无法保存启动器设置，请检查本机目录权限。')
 
     def refresh_project(self):
@@ -226,6 +245,7 @@ class App(tk.Tk):
             while True:
                 event=self.events.get_nowait()
                 if event[0]=='progress':self.progress['value']=event[1]*100;continue
+                if event[0]=='phase':self.status.set(event[1]);continue
                 if event[-1]:
                     self.busy=False
                     for w in self.control_widgets:w.configure(state='normal')
@@ -282,16 +302,63 @@ class App(tk.Tk):
             else:raise ValueError('请选择对应的 UnrealEditor.exe，确认 UE 版本后再安装。')
             origin,item=self.package_choice(offline_only);project=str(info['file']);self.save_settings()
         except Exception as error:messagebox.showerror('请先完成设置',str(error),parent=self);return
+        if not messagebox.askyesno('确认安装插件','将安装插件 '+item['version']+' 到：\n'+str(info['plugin'])+'\n\n如有此版本的已验证本机适配包，会一并使用。旧插件会备份到该工程 Saved/VFXMeshGenerator。\n首次安装或原生组件更新需先保存并关闭该工程。是否继续？',parent=self):return
         self.status.set('正在校验并安装插件，请稍等…');self.progress['value']=0
         def job():
             archive=BASE/'offline'/item['file'] if origin=='offline' else core.download(item,STATE/'Downloads',lambda v:self.events.put(('progress',v)))
-            return core.install(project,archive,item,engine_path=engine)
+            local=native_builder.cached(engine,item,STATE/'NativeBuilds')
+            return core.install(project,*(local or (archive,item)),engine_path=engine)
         def done(result):
             self.progress['value']=100;self.refresh_project()
             self.status.set({'hot_reloaded':'已完成热更新，UE 面板已刷新，当前模型参数保留。',
                 'restart_required':'插件已更新。首次启用热更新连接，请保存并重启 UE 一次。',
                 'installed':'安装完成，点击“启动 UE / 独立工作台”开始制作。'}[result['mode']])
         self.worker(job,done)
+
+    def startup_compatibility(self):
+        self._compat_after=None
+        if not self.engine.get():return
+        if self.busy:
+            self._compat_after=self.after(1000,self.startup_compatibility);return
+        try:
+            engine=str(core.validate_engine(self.engine.get()))
+            item=core.read_json(BASE/'offline/manifest.json')['plugin'];archive=BASE/'offline'/item['file']
+        except Exception as error:self.status.set('自动兼容性检测未完成：'+str(error));return
+        def done(report):
+            result=report['engine']
+            if result['compatible']:
+                self.status.set('启动检测通过：'+core.engine_version_label(result.get('engine_version'))+'，已有匹配组件，无需编译。');return
+            self.status.set('启动检测发现当前 UE 缺少匹配适配组件。')
+            content='当前所选引擎：\n'+engine+'\n'+core.engine_version_label(result.get('engine_version'))+'\nBuildId：'+result['build_id']
+            content+='\n\n内置插件 '+item['version']+' 没有匹配组件。是否现在检查编译条件，并为这套引擎编译适配？\n\n需要 MSVC / Windows SDK 和该引擎的完整开发文件。会启动独立空工程验证；通过后仍需确认安装。'
+            if messagebox.askyesno('当前 UE 需要编译适配',content,parent=self):self.compile_adapter(confirmed=True)
+        self.status.set('启动时自动检测当前引擎…')
+        def job():
+            if core.digest(archive)!=item['sha256']:raise ValueError('内置安装包校验失败，请重新解压启动器。')
+            return native_builder.diagnostic(engine,archive,item,STATE/'NativeBuilds')
+        self.worker(job,done)
+
+    def compile_adapter(self,confirmed=False):
+        try:
+            engine=str(core.validate_engine(self.engine.get()))
+            item=core.read_json(BASE/'offline/manifest.json')['plugin'];archive=BASE/'offline'/item['file']
+        except Exception as error:messagebox.showerror('请先选择引擎',str(error),parent=self);return
+        def ready(config):
+            if not confirmed and not messagebox.askyesno('开始本机编译适配',config['version']+'\n引擎：'+engine+'\n\n将使用所选引擎的开发文件和 UE 检测到的 C++ 工具链编译内置插件 '+item['version']+'。\n工作目录：'+str(STATE/'NativeBuilds')+'\n\n随后会启动独立空工程，检查预览、材质和重复开关。首次可能需要数分钟；验证通过后才可安装。是否开始？',parent=self):return
+            def done(result):
+                self.status.set('本机适配验证通过。点击“安装 / 更新插件”并确认目标工程后安装。')
+                messagebox.showinfo('本机适配完成',result['version']+'\n编译和独立预览验证通过，尚未安装到用户工程。\n\n下一步：选择工程 → 安装内置版本 → 确认安装。\n此适配只用于内置插件 '+item['version']+' 与当前引擎文件；更换版本后需重新编译。\n\n日志：'+result['work'],parent=self)
+            self.worker(lambda:native_builder.build(engine,archive,item,BASE/'compiler',STATE/'NativeBuilds',
+                        lambda message:self.events.put(('phase',message))),done)
+        self.status.set('正在检查本机编译条件…')
+        self.worker(lambda:native_builder.preflight(engine,BASE/'compiler'),ready)
+
+    def open_build_logs(self):
+        try:
+            record=core.read_json(STATE/'NativeBuilds/last-build.json');path=Path(record['work']).resolve()
+            if not path.is_relative_to((STATE/'NativeBuilds').resolve()) or not path.is_dir():raise ValueError('工作目录不存在。')
+            os.startfile(str(path))
+        except (OSError,ValueError,KeyError):messagebox.showinfo('编译日志','尚无编译记录。先选择引擎，再点击“为当前引擎编译适配”。',parent=self)
 
     def export_diagnostic(self):
         try:
@@ -304,7 +371,7 @@ class App(tk.Tk):
         if not path:return
         update_error=self.last_update_error
         def job():
-            report=core.diagnostic_report(engine,archive);report['update_error']=update_error
+            report=native_builder.diagnostic(engine,archive,offline,STATE/'NativeBuilds');report['update_error']=update_error
             core.write_json(path,report);return report
         def done(report):
             self.status.set('诊断报告已保存：'+path)
@@ -322,7 +389,7 @@ class App(tk.Tk):
             window.transient(self);window.configure(bg=BG)
             frame=ttk.Frame(window,padding=20);frame.pack(fill='both',expand=True)
             self.label(frame,'检测通过' if result['compatible'] else '需要处理兼容性差异','Heading.TLabel')
-            content='检测的插件：'+report['plugin_version']+'（启动器内置包）\n引擎：'+engine+'\nBuildId：'+result['build_id']+'\n\n'
+            content='检测的插件：'+report['plugin_version']+('（已验证本机适配）' if report.get('local_adapter') else '（启动器内置包）')+'\n引擎：'+engine+'\n当前版本：'+core.engine_version_label(result.get('engine_version'))+'\n组件目标：'+core.engine_version_label(result.get('expected_engine_version'))+'\nBuildId：'+result['build_id']+'\n\n'
             content+=report['solution']+'\n\n文件检查：\n'
             for f in result['files']:
                 content+=({'match':'通过','missing':'缺失','different':'内容不同'}[f['status']])+'  '+Path(f['file']).name+'\n'
@@ -340,7 +407,7 @@ class App(tk.Tk):
             self.button(actions,'导出这份检测报告',save).pack(side='left')
             self.button(actions,'关闭',window.destroy).pack(side='right')
             self.status.set('兼容性检测通过。' if result['compatible'] else '已列出不匹配文件和解决方案；工程未修改。')
-        self.status.set('正在只读检测引擎与内置插件的兼容性…');self.worker(lambda:core.diagnostic_report(engine,archive),done)
+        self.status.set('正在只读检测引擎与内置插件的兼容性…');self.worker(lambda:native_builder.diagnostic(engine,archive,item,STATE/'NativeBuilds'),done)
 
     def launch(self):
         project,engine=self.project.get(),self.engine.get();self.save_settings();self.status.set('正在打开你的工程与网格面板…')
@@ -386,7 +453,7 @@ class App(tk.Tk):
     def close(self):
         if self.busy:messagebox.showinfo('请稍等','正在安装或更新，请完成后再关闭启动器。',parent=self);return
         self.save_settings();self.closing=True
-        for handle in (self._pump_after,self._check_after):
+        for handle in (self._pump_after,self._check_after,self._compat_after):
             if handle:
                 try:self.after_cancel(handle)
                 except tk.TclError:pass
@@ -395,14 +462,15 @@ class App(tk.Tk):
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--project',default='');parser.add_argument('--no-auto-check',action='store_true')
+    parser.add_argument('--engine',default='')
     parser.add_argument('--self-test',metavar='REPORT')
     args=parser.parse_args()
     if args.self_test:
         feed=core.read_json(BASE/'offline/manifest.json');item=feed['plugin'];archive=BASE/'offline'/item['file']
-        report={'version':VERSION,'offline_checksum':core.digest(archive)==item['sha256'],'guide':(BASE/'使用教学.html').is_file(),'tk':str(tk.TkVersion)}
+        report={'version':VERSION,'offline_checksum':core.digest(archive)==item['sha256'],'compiler_payload':native_builder.validate_payload(BASE/'compiler'),'guide':(BASE/'使用教学.html').is_file(),'tk':str(tk.TkVersion)}
         core.write_json(args.self_test,report);return
     if prefer_updated_launcher():return
-    app=App(args.project,False if args.no_auto_check else None);app.mainloop()
+    app=App(args.project,False if args.no_auto_check else None,args.engine);app.mainloop()
 
 
 if __name__=='__main__':main()
