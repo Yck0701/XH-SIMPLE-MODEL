@@ -3,18 +3,18 @@
   "product": "VFXMeshGenerator",
   "repository": "Yck0701/XH-SIMPLE-MODEL",
   "engine": "5.8",
-  "minimum_launcher": "1.2.0",
-  "notes": "新增只读兼容性检测与差异报告，保留 BuildId 和 DLL 校验，逐类给出解决方案。更新检查与下载增加 GitHub 官方备用通道和重试；网络失败显示原因，支持内置离线安装和浏览器下载。本版原生组件与 1.5.2 相同；从 1.5.1 或更早版本升级仍需关闭对应工程。",
+  "minimum_launcher": "1.5.4",
+  "notes": "新增本机编译适配：携带原生源码与构建附件，使用所选 UE 的开发文件，独立空工程验证通过后再确认安装。按具体版本和 DLL 指纹隔离适配组件，支持同 BuildId 的不同构建；保留兼容性检查。新增引擎规则缓存缺失时的独立重建。官方与更新后的公司 UE 5.8.3 已验证，包含对应组件；UE 5.8.2 需在目标电脑编译验证。本次升级需要关闭对应工程。",
   "plugin": {
-    "version": "1.5.3",
-    "url": "https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.3/VFXMeshGenerator-1.5.3-UE5.8.zip",
-    "sha256": "3e57135a15dd0c7d355fc6fe869e5b29027847165f680ee1b25b747a80796303",
-    "size": 348686
+    "version": "1.5.4",
+    "url": "https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.4/VFXMeshGenerator-1.5.4-UE5.8.zip",
+    "sha256": "3250c1aff65b3203a344b193a3f34444d33272181bd4eea4d2a068c819b9b3df",
+    "size": 482659
   },
   "launcher": {
-    "version": "1.5.3",
-    "url": "https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.3/VFXMeshLauncher-1.5.3-Windows.zip",
-    "sha256": "20586bd789590286a56dc8d2a91c4e08bc16d403455e8c312b8aee135f0c55a2",
-    "size": 13985408
+    "version": "1.5.4",
+    "url": "https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.4/VFXMeshLauncher-1.5.4-Windows.zip",
+    "sha256": "efab575c44ac9c7d76eaeae2e922a02996188f90f2d080a69b2f06cab8f235c6",
+    "size": 14149018
   }
 }
