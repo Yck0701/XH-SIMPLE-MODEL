@@ -1,0 +1,18 @@
+{
+  "tool": "Built-in image_gen",
+  "transparent_background": true,
+  "prompts": [
+    [
+      "a",
+      "Use case: logo-brand. Asset: Windows desktop launcher application icon for a VFX parametric mesh authoring tool called VFX MESH. Generate ONE icon, square image. A distinctive low-poly faceted sphere with a clean geometric wireframe on its upper-left surface transitioning into a solid faceted lower-right surface, with a single small spark at the top-right. Elegant professional digital-content-creation software identity, bold silhouette readable at 32px. Dark midnight-navy rounded-square tile, luminous mint-teal edges and cool cyan faceted surfaces, restrained satin material, crisp thick lines, minimal details. Straight-on centered composition, tile fills 88% of the square with transparent outside corners/background. No text, no letters, no Unreal logo, no watermark, no extra objects, no perspective tilt of tile, no soft ambient drop shadow beyond tile."
+    ],
+    [
+      "b",
+      "Use case: logo-brand. Asset: Windows desktop launcher app icon for VFX MESH, a parametric visual-effects mesh tool. Generate ONE square app icon. Symbol: a single sculptural twisting ribbon swept into a clean open loop, three broad polygonal faces with a few clearly visible wireframe segments suggesting editable topology. Strong dynamic silhouette, refined 3D satin-metal finish, simple enough at 32px. Dark midnight-navy rounded-square tile, icy cyan and electric cobalt ribbon, tiny mint highlight. Centered straight-on app tile filling 88% of image, transparent exterior and corners. No text, no letters, no Unreal logo, no watermark, no extra sparkles or tiny particles, no tile perspective, no drop shadow outside tile."
+    ],
+    [
+      "c",
+      "Use case: logo-brand. Asset: Windows launcher application icon for a VFX geometry modeling tool. Generate ONE square app icon. Symbol: bold geometric spark built from four interlocking beveled polygonal mesh panels, a small central diamond-shaped opening and a few topology edges. Convey geometry plus effects; distinctive uncluttered silhouette recognizable at 32px. Dark midnight-navy rounded-square tile, warm amber and burnished orange panels with pale gold highlights, premium restrained satin finish. Centered straight-on app tile occupying 88% of canvas, transparent outside and corners. No text, no letters, no Unreal logo, no watermark, no busy particles, no tile perspective, no external drop shadow."
+    ]
+  ]
+}

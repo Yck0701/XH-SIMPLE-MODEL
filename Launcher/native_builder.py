@@ -4,6 +4,7 @@ No user project is accepted by this module. A successful compiler exit alone is
 not installable: a disposable editor must pass the lifecycle verification first.
 """
 import json
+from contextvars import ContextVar
 import os
 from pathlib import Path
 import re
@@ -14,6 +15,14 @@ import uuid
 import zipfile
 import core
 import native_profiles
+
+_cancel=ContextVar('build_cancel',default=None)
+
+
+def check_cancelled():
+    event=_cancel.get()
+    if event is not None and event.is_set():raise RuntimeError('已取消本次编译。未安装到用户工程，可稍后重试。')
+
 
 MODULES = ('Core','CoreUObject','Engine','Slate','SlateCore','UMG','UnrealEd','AdvancedPreviewScene',
            'GeometryFramework','GeometryCore','DynamicMesh','RenderCore','RHI','InputCore','ApplicationCore',
@@ -69,6 +78,28 @@ def validate_payload(payload):
     return True
 
 
+def windows_sdks(roots=None):
+    if roots is None:
+        roots=[Path(os.environ.get('ProgramFiles(x86)','C:/Program Files (x86)'))/'Windows Kits/10']
+        if os.environ.get('WindowsSdkDir'):roots.append(Path(os.environ['WindowsSdkDir']))
+        if os.name=='nt':
+            import winreg
+            for view in (winreg.KEY_WOW64_64KEY,winreg.KEY_WOW64_32KEY):
+                try:
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,r'SOFTWARE\Microsoft\Windows Kits\Installed Roots',0,winreg.KEY_READ|view) as key:
+                        roots.append(Path(winreg.QueryValueEx(key,'KitsRoot10')[0]))
+                except OSError:pass
+    found=[]
+    for root in roots:
+        root=Path(root)
+        for include in (root/'Include').glob('10.*'):
+            version=include.name
+            files=(include/'um/Windows.h',include/'ucrt/stdio.h',root/'Lib'/version/'um/x64/kernel32.lib',
+                   root/'Lib'/version/'ucrt/x64/ucrt.lib',root/'bin'/version/'x64/rc.exe')
+            if all(p.is_file() for p in files):found.append(str(root)+' / '+version)
+    return sorted(set(found))
+
+
 def preflight(engine_path,payload):
     engine=core.validate_engine(engine_path).parents[2];validate_payload(payload)
     for name in ('Source/Runtime/Core/Public/CoreMinimal.h','Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll'):
@@ -85,6 +116,7 @@ def preflight(engine_path,payload):
                            '-property','installationPath'],capture_output=True,encoding='utf-8',errors='replace',timeout=30,
                           creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
     if result.returncode or not result.stdout.strip():raise ValueError('缺少 MSVC x64/x86 编译器。请在 Visual Studio Installer 中添加 C++ 开发工作负载与 Windows SDK；版本以所选 UE 的要求为准。')
+    if not windows_sdks():raise ValueError('未找到完整的 Windows SDK（头文件、x64 库与资源编译器）。请在 Visual Studio Installer 的“单个组件”中安装所选 UE 要求的 Windows SDK，然后点击重试。')
     libs=libraries(engine)
     if shutil.disk_usage(Path(payload).anchor).free<2*1024**3:raise ValueError('启动器所在磁盘可用空间不足 2 GB。')
     return {'engine':engine,'dotnet':dotnets[0],'libraries':libs,'version':core.engine_version_label(core.read_json(engine/'Build/Build.version'))}
@@ -95,11 +127,18 @@ def run_process(args,cwd,log,timeout,env=None):
     with Path(log).open('wb') as output:
         process=subprocess.Popen([str(a) for a in args],cwd=cwd,stdout=output,stderr=subprocess.STDOUT,env=env,
                                  creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
-        try:code=process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
+        deadline=time.monotonic()+timeout
+        try:
+            while True:
+                check_cancelled()
+                if time.monotonic()>deadline:raise subprocess.TimeoutExpired(args,timeout)
+                try:code=process.wait(timeout=.25);break
+                except subprocess.TimeoutExpired:pass
+        except (subprocess.TimeoutExpired,RuntimeError) as error:
             subprocess.run(['taskkill','/PID',str(process.pid),'/T','/F'],capture_output=True,timeout=30,
                            creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
             process.wait(timeout=30)
+            if isinstance(error,RuntimeError):raise
             raise RuntimeError('操作超时，已停止本次测试进程。日志：'+str(log))
     if code:
         details=Path(log).read_text(encoding='utf-8',errors='replace')[-12000:]
@@ -179,7 +218,16 @@ def diagnostic(engine_path,archive,item,cache):
     return report
 
 
-def build(engine_path,archive,item,payload,cache,progress=lambda message:None):
+def build(engine_path,archive,item,payload,cache,progress=lambda message:None,cancel_event=None):
+    token=_cancel.set(cancel_event)
+    try:
+        check_cancelled()
+        return _build(engine_path,archive,item,payload,cache,progress)
+    finally:_cancel.reset(token)
+
+
+def _build(engine_path,archive,item,payload,cache,progress):
+    check_cancelled()
     progress('1/4  检查引擎开发文件与 C++ 工具链…')
     config=preflight(engine_path,payload);engine=config['engine']
     if core.digest(archive)!=item['sha256'] or Path(archive).stat().st_size!=item['size']:raise ValueError('原始插件安装包校验失败。')
@@ -194,6 +242,7 @@ def build(engine_path,archive,item,payload,cache,progress=lambda message:None):
         shutil.copytree(Path(payload)/'CompilerHost',target)
         project=host/'NativeHost.uproject'
         core.write_json(project,{'FileVersion':3,'Plugins':[{'Name':'VFXPreviewBuild','Enabled':True}]})
+        check_cancelled()
         progress('2/4  由所选 UE 生成编译配置…（首次可能需要数分钟）')
         env=os.environ.copy();env.update(DOTNET_CLI_TELEMETRY_OPTOUT='1',DOTNET_SKIP_FIRST_TIME_EXPERIENCE='1',DOTNET_NOLOGO='1')
         repaired=configure(config,['UnrealEditor','Win64','Development','-Project='+str(project),'-plugin='+str(target/'VFXPreviewBuild.uplugin'),
@@ -208,6 +257,7 @@ def build(engine_path,archive,item,payload,cache,progress=lambda message:None):
         compiler,lines=compiler_arguments(configs[0],engine,work,plugin/'Source/NativePreview/Preview.cpp',work,config['libraries'])
         rsp=work/'compile.rsp';rsp.write_text('\n'.join(lines),encoding='utf-8-sig')
         env['PATH']=str(compiler.parent)+os.pathsep+env.get('PATH','')
+        check_cancelled()
         progress('2/4  正在编译当前引擎专用组件…')
         run_process([compiler,'@'+str(rsp)],work,work/'compile.log',600,env)
         if fingerprint(engine)!=before:raise ValueError('编译过程中引擎发生变化，请等待引擎同步完成后重试。')
@@ -224,6 +274,7 @@ def build(engine_path,archive,item,payload,cache,progress=lambda message:None):
         core.write_json(smoke_project,{'FileVersion':3,'Plugins':[{'Name':core.PLUGIN,'Enabled':True}]})
         shutil.copy2(Path(payload)/'verify_native.py',smoke/'verify_native.py')
         core.write_json(smoke/'verify-config.json',{'nonce':uuid.uuid4().hex,'profile':relative.as_posix()})
+        check_cancelled()
         progress('3/4  在独立空工程验证预览、材质与重复开关…（会短暂打开测试编辑器）')
         run_process([engine_path,smoke_project,'-nosplash','-nosound','-unattended','-NoRestoreOpenAssetTabs',
                      '-NoLiveCoding','-ddc=NoShared','-ExecutePythonScript='+(smoke/'verify_native.py').as_posix(),
@@ -233,12 +284,14 @@ def build(engine_path,archive,item,payload,cache,progress=lambda message:None):
         if report.get('passed') is not True or report.get('nonce')!=verify_config['nonce'] or report.get('profile')!=relative.as_posix():
             raise RuntimeError('独立编辑器验证未通过，请查看 '+str(work/'verify-editor.log'))
         if fingerprint(engine)!=before:raise ValueError('验证过程中引擎发生变化，结果已丢弃，请重试。')
+        check_cancelled()
         progress('4/4  验证通过，正在保存本机适配包…')
         ready=cache/identity;ready.mkdir(exist_ok=True);temporary=work/'plugin.zip'
         with zipfile.ZipFile(temporary,'w',zipfile.ZIP_DEFLATED) as zipped:
             for path in sorted(plugin.rglob('*')):
                 if path.is_file() and '__pycache__' not in path.parts and path.suffix!='.pyc':zipped.write(path,core.PLUGIN+'/'+path.relative_to(plugin).as_posix())
         derived={'version':item['version'],'sha256':core.digest(temporary),'size':temporary.stat().st_size}
+        check_cancelled()
         os.replace(temporary,ready/'plugin.zip')
         core.write_json(ready/'receipt.json',{'schema':1,'source_sha256':item['sha256'],'engine':before,'plugin':derived,
                                              'verification':report,'rules_rebuilt_in_cache':repaired,'work':str(work),'compiler':str(compiler),'time':time.time()})

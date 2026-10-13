@@ -34,10 +34,11 @@ def main():
     zip_tree(ROOT/'Plugin/VFXMeshGenerator',plugin,'VFXMeshGenerator')
     if not args.reuse_launcher:
         subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--clean','--windowed','--onedir',
-            '--name','VFX特效网格启动器','--distpath',str(ROOT/'dist'/VERSION),'--workpath',str(ROOT/'build'),
+            '--name','VFX特效网格启动器','--icon',str(ROOT/'Launcher/assets/app.ico'),'--distpath',str(ROOT/'dist'/VERSION),'--workpath',str(ROOT/'build'),
             '--specpath',str(ROOT/'build'),str(ROOT/'Launcher/app.py')],check=True,cwd=ROOT)
     bundle=ROOT/'dist'/VERSION/'VFX特效网格启动器'
     assert (bundle/'VFX特效网格启动器.exe').is_file()
+    shutil.copytree(ROOT/'Launcher/assets',bundle/'assets',dirs_exist_ok=True)
     offline=bundle/'offline';offline.mkdir(exist_ok=True)
     for stale in offline.glob('*.zip'):stale.unlink()
     shutil.copy2(plugin,offline/plugin.name)
@@ -51,12 +52,12 @@ def main():
         p.relative_to(compiler).as_posix():core.digest(p) for p in compiler.rglob('*') if p.is_file() and p.name!='manifest.json'}})
     shutil.copy2(ROOT/'docs/使用教学.html',bundle/'使用教学.html')
     shutil.copy2(ROOT/'version.json',bundle/'version.json')
-    (bundle/'先读我.txt').write_text('完整解压后，双击 VFX特效网格启动器.exe。\n选择 .uproject → 安装插件 → 重启 UE → 特效网格 → 打开独立工作台。\n请保留 _internal 与 offline 目录。详细步骤见 使用教学.html。\n',encoding='utf-8-sig')
+    (bundle/'先读我.txt').write_text('完整解压后，双击 VFX特效网格启动器.exe。\n选择 .uproject → 自动查找引擎并检测 → 必要时一键编译验证 → 确认安装 → 启动工作台。\n请保留 assets、compiler、_internal 与 offline 目录。详细步骤见 使用教学.html。\n',encoding='utf-8-sig')
     launcher=release/f'VFXMeshLauncher-{VERSION}-Windows.zip'
     zip_tree(bundle,launcher,'VFXMeshLauncher')
     base=f'https://github.com/{REPOSITORY}/releases/download/vfx-v{VERSION}/'
-    feed={'schema':1,'product':'VFXMeshGenerator','repository':REPOSITORY,'engine':'5.8','minimum_launcher':'1.5.6',
-        'notes':'请先更新启动器到 1.5.6。修复引擎信息读取失败后路径未保留、错误被误提示为选择引擎的问题；支持路径引号、首尾空格和引擎目录。UE 描述文件支持注释及尾逗号，JSON 错误显示具体文件与行列，日志在弹窗前保存。继续严格校验版本、BuildId、DLL 和安装包；不改写工程与引擎描述文件。'}
+    feed={'schema':1,'product':'VFXMeshGenerator','repository':REPOSITORY,'engine':'5.8','minimum_launcher':'1.5.7',
+        'notes':'请先更新启动器到 1.5.7。增强工程关联、附近目录、注册表、Epic 安装记录与每工程引擎记忆；更换选择自动检测，多候选明确列出。新增一键编译、独立验证和安装确认的连续流程，支持取消、耗时和失败重试。新增三款 PNG/ICO 图标。保留 UE 5.8、版本、BuildId、DLL 指纹与安装包校验，不改写工程关联或引擎文件。'}
     for key,file in [('plugin',plugin),('launcher',launcher)]:
         feed[key]={'version':VERSION,'url':base+file.name,'sha256':core.digest(file),'size':file.stat().st_size}
     core.validate_feed(feed);core.write_json(release/'vfx-manifest.json',feed)

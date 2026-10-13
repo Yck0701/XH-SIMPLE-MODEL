@@ -4,13 +4,23 @@
 
 **[下载 Windows 启动器](https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/latest)** · **[5 步使用教学](docs/使用教学.md)**
 
-当前正式版：**1.5.6（2026-10-13）**。[直接下载启动器 ZIP](https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.6/VFXMeshLauncher-1.5.6-Windows.zip) · [版本说明与校验文件](https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/tag/vfx-v1.5.6)。完整解压并保留 `compiler`、`offline`、`_internal` 文件夹。
+当前正式版：**1.5.7（2026-10-13）**。[直接下载启动器 ZIP](https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.7/VFXMeshLauncher-1.5.7-Windows.zip) · [版本说明与校验文件](https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/tag/vfx-v1.5.7)。完整解压并保留 `compiler`、`offline`、`_internal` 文件夹。
 
 ## 三步开始
 
-1. 完整解压 `VFXMeshLauncher-1.5.6-Windows.zip`，双击 `VFX特效网格启动器.exe`。无需安装 Python。
-2. 选择 `.uproject` 和对应引擎，点击 **安装 / 更新插件**。从 1.5.4 升级可热更新；其他版本按启动器提示先保存工作并关闭对应工程。
+1. 完整解压 `VFXMeshLauncher-1.5.7-Windows.zip`，双击 `VFX特效网格启动器.exe`。无需安装 Python。
+2. 选择 `.uproject` 后自动查找引擎并检测。通过后确认安装；需要适配时点 **一键编译并继续安装**，验证通过后再确认目标工程。多个引擎候选请按路径选择。原生组件变化需先保存并关闭该工程。
 3. 重新打开 UE，在顶部 **特效网格 → 打开独立工作台** 进入。左侧调模型、中间看预览、右侧调材质；点击左侧“保存位置”下方的 **保存生成模型…** 并确认后生成资产。
+
+## 1.5.7 自动索引与连续适配
+
+- 选择工程后自动查找对应引擎：支持工程路径关联、GUID 注册、Epic 安装记录、工程附近 / 同级 / 上级引擎及常用安装目录。记录每个工程确认过的引擎；切换工程不会沿用上个工程的选择。
+- 多个候选显示版本、来源和完整路径，无法确定时请选一次。不会全盘递归扫描，不更改工程关联或引擎注册表。
+- 选择工程或引擎后自动检测，后台结果只用于当前选择。检测通过即可确认安装；缺少匹配组件时，先检查 C++ 开发文件、MSVC 和 Windows SDK。
+- 点击“一键编译并继续安装”后连续完成编译和独立验证，再自动显示目标工程安装确认。显示阶段与耗时，可取消编译；缺少依赖提供安装器 / 说明入口，安装失败可重试并复用已验证结果。
+- 新增三款启动器图标：青色网格球、蓝色流动环、金色几何星，提供透明 PNG 与 Windows ICO。当前使用 A 款；启动器“使用教学”可打开图标方案。
+
+完整解压并保留 `assets`、`compiler`、`offline`、`_internal`。本次必须更新启动器；只更新 UE 插件不会获得新的索引和适配流程。UE 5.8 之外的版本仍不支持；缺少同构建开发文件或出现 API 差异时，需按实际提示补齐 / 适配，不能绕过验证。
 
 ## 1.5.6 修复引擎选择与检测提示
 

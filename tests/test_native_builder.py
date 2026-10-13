@@ -50,21 +50,20 @@ class NativeBuildTests(unittest.TestCase):
         root=Path(__file__).resolve().parents[1]
         self.assertEqual((root/'Launcher/native_profiles.py').read_bytes(),(root/'Plugin/VFXMeshGenerator/Content/Python/vfx_mesh/native_profiles.py').read_bytes())
 
-    def test_startup_detects_selected_engine_and_requires_compile_confirmation(self):
+    def test_startup_detects_without_starting_compilation_or_showing_modal(self):
         import app,time
         base=self.root/'bundle';(base/'offline').mkdir(parents=True)
         shutil.copy2(self.archive,base/'offline/plugin.zip');core.write_json(base/'offline/manifest.json',{'plugin':dict(self.item,file='plugin.zip')})
         report={'engine':{'compatible':False,'build_id':'55116800','engine_version':self.version}}
-        for answer in (False,True):
-            with self.subTest(answer=answer),patch.object(app,'BASE',base),patch.object(app,'STATE',self.root/'state'),patch.object(builder,'diagnostic',return_value=report) as detect,patch.object(app.messagebox,'askyesno',return_value=answer) as ask,patch.object(app.App,'compile_adapter') as compile_adapter:
-                window=app.App(auto_check=False,initial_engine=str(self.exe));window.withdraw()
+        with patch.object(app,'BASE',base),patch.object(app,'STATE',self.root/'state'),patch.object(builder,'diagnostic',return_value=report) as detect,patch.object(builder,'preflight',return_value={}),patch.object(app.messagebox,'askyesno') as ask,patch.object(builder,'build') as build:
+            window=app.App(auto_check=False,initial_engine=str(self.exe));window.withdraw()
+            try:
                 deadline=time.monotonic()+3
-                while not ask.called and time.monotonic()<deadline:window.update();time.sleep(.02)
+                while window.setup_result is None and time.monotonic()<deadline:window.update();time.sleep(.02)
+                self.assertIsNotNone(window.setup_result)
                 self.assertEqual(detect.call_args.args[0],str(self.exe.resolve()))
-                self.assertIn('5.8.2',ask.call_args.args[1]);self.assertIn('55116800',ask.call_args.args[1])
-                if answer:compile_adapter.assert_called_once_with(confirmed=True)
-                else:compile_adapter.assert_not_called()
-                window.close()
+                self.assertIn('一键编译',window.setup_button.cget('text'));ask.assert_not_called();build.assert_not_called()
+            finally:window.close()
 
     def test_startup_controls_remain_visible_at_minimum_size(self):
         import app
@@ -74,7 +73,7 @@ class NativeBuildTests(unittest.TestCase):
                 for child in parent.winfo_children():yield child;yield from children(child)
             buttons=[w for w in children(window.pages['home']) if isinstance(w,app.ttk.Button)]
             window.content_canvas.yview_moveto(1);window.update()
-            button=next(b for b in buttons if str(b.cget('text'))=='为当前引擎编译适配…')
+            button=next(b for b in buttons if str(b.cget('text'))=='查看编译日志')
             self.assertTrue(window.status_label.winfo_viewable())
             self.assertGreaterEqual(button.winfo_rooty(),window.content_canvas.winfo_rooty())
             self.assertLessEqual(button.winfo_rooty()+button.winfo_height(),window.status_label.winfo_rooty())
@@ -99,6 +98,32 @@ class NativeBuildTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'缺少开发文件'):builder.preflight(self.exe,self.payload)
         (self.payload/'verify_native.py').write_text('tampered')
         with self.assertRaisesRegex(ValueError,'校验失败'):builder.validate_payload(self.payload)
+
+    def test_sdk_check_requires_headers_libraries_and_resource_compiler(self):
+        root=self.root/'SDK';version='10.0.12345.0'
+        for relative in ('Include/'+version+'/um/Windows.h','Include/'+version+'/ucrt/stdio.h',
+                         'Lib/'+version+'/um/x64/kernel32.lib','Lib/'+version+'/ucrt/x64/ucrt.lib'):
+            path=root/relative;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b'sdk')
+        self.assertFalse(builder.windows_sdks([root]))
+        rc=root/'bin'/version/'x64/rc.exe';rc.parent.mkdir(parents=True);rc.write_bytes(b'rc')
+        self.assertEqual(len(builder.windows_sdks([root])),1)
+
+    def test_cancel_stops_only_the_spawned_child_and_publishes_no_receipt(self):
+        import threading,subprocess
+        event=threading.Event()
+        class Process:
+            pid=87654
+            def wait(self,timeout):
+                if timeout==30:return 1
+                event.set();raise subprocess.TimeoutExpired('test',timeout)
+        token=builder._cancel.set(event)
+        try:
+            with patch.object(builder.subprocess,'Popen',return_value=Process()),patch.object(builder.subprocess,'run') as stop:
+                with self.assertRaisesRegex(RuntimeError,'已取消'):builder.run_process(['compiler'],self.root,self.root/'cancel.log',30)
+                self.assertEqual(stop.call_args.args[0],['taskkill','/PID','87654','/T','/F'])
+        finally:builder._cancel.reset(token)
+        with self.assertRaisesRegex(RuntimeError,'已取消'):builder.build(self.exe,self.archive,self.item,self.payload,self.cache,cancel_event=event)
+        self.assertFalse(self.cache.exists())
 
     def test_rules_repair_is_confined_to_cache_and_unrelated_errors_do_not_retry(self):
         rules=self.engine/'Intermediate/Build/BuildRules';core.write_json(rules/'UE5RulesManifest.json',{'keep':True})

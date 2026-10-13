@@ -246,20 +246,9 @@ def project_info(filename):
 
 
 def detect_engine(info):
-    candidates=[info['root']/'UE/Engine/Binaries/Win64/UnrealEditor.exe',info['root']/'Engine/Binaries/Win64/UnrealEditor.exe']
-    if os.name=='nt':
-        import winreg
-        try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,r'Software\Epic Games\Unreal Engine\Builds') as key:
-                location=winreg.QueryValueEx(key,info['association'])[0]
-                candidates.append(Path(location)/'Engine/Binaries/Win64/UnrealEditor.exe')
-        except OSError:pass
-        try:
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,'SOFTWARE\\EpicGames\\Unreal Engine\\'+info['association']) as key:
-                location=winreg.QueryValueEx(key,'InstalledDirectory')[0]
-                candidates.append(Path(location)/'Engine/Binaries/Win64/UnrealEditor.exe')
-        except OSError:pass
-    return next((p.resolve() for p in candidates if p.is_file()),None)
+    import engine_discovery
+    selected=engine_discovery.discover(info)['selected']
+    return Path(selected) if selected else None
 
 
 def engine_executable(path):
