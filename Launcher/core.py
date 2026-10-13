@@ -29,7 +29,7 @@ MAX_DOWNLOAD = 250 * 1024 * 1024
 
 
 def read_json(path):
-    return json.loads(Path(path).read_text(encoding='utf-8-sig'))
+    return native_profiles.read_json(path)
 
 
 def write_json(path, data):
@@ -262,10 +262,26 @@ def detect_engine(info):
     return next((p.resolve() for p in candidates if p.is_file()),None)
 
 
+def engine_executable(path):
+    value=os.fspath(path).strip() if path is not None else ''
+    if len(value)>=2 and value[0]==value[-1] and value[0] in ('"',"'"):value=value[1:-1].strip()
+    if not value:raise ValueError('尚未选择引擎。请点击“选择引擎”，选择本机的 UnrealEditor.exe。')
+    executable=Path(os.path.expandvars(value)).expanduser().resolve()
+    if executable.is_dir():
+        candidates=[executable/'Binaries/Win64/UnrealEditor.exe',executable/'Engine/Binaries/Win64/UnrealEditor.exe',executable/'UnrealEditor.exe']
+        existing=[p for p in candidates if p.is_file()]
+        if len(existing)==1:executable=existing[0]
+        elif len(existing)>1:raise ValueError('该目录内找到多个引擎，请明确选择对应的 UnrealEditor.exe：\n'+str(executable))
+    if executable.name.lower()!='unrealeditor.exe' or not executable.is_file():
+        raise ValueError('所填引擎路径不存在或不是 UnrealEditor.exe：\n'+str(executable)+'\n请检查当前电脑的盘符和目录，或重新浏览选择。')
+    return executable
+
+
 def validate_engine(path):
-    executable=Path(path).resolve()
-    if executable.name.lower()!='unrealeditor.exe' or not executable.is_file():raise ValueError('请选择引擎的 UnrealEditor.exe。')
+    executable=engine_executable(path)
     build=read_json(executable.parents[2]/'Build/Build.version')
+    if not isinstance(build,dict) or any(type(build.get(k)) is not int for k in ('MajorVersion','MinorVersion')):
+        raise ValueError('引擎版本信息缺少有效的 MajorVersion / MinorVersion：\n'+str(executable.parents[2]/'Build/Build.version'))
     if (build['MajorVersion'],build['MinorVersion'])!=(5,8):raise ValueError('当前插件适用于 UE 5.8，请选择对应引擎。')
     return executable
 

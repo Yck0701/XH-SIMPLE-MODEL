@@ -26,6 +26,14 @@ def settings():
     except (OSError,ValueError):return {}
 
 
+def log_error(details):
+    try:
+        STATE.mkdir(parents=True,exist_ok=True)
+        with (STATE/'launcher.log').open('a',encoding='utf-8') as log:
+            log.write(time.strftime('%Y-%m-%d %H:%M:%S')+'\n'+details+'\n')
+    except OSError:pass
+
+
 def prefer_updated_launcher():
     if not getattr(sys,'frozen',False):return False
     try:
@@ -226,8 +234,20 @@ class App(tk.Tk):
     def browse_engine(self):
         path=filedialog.askopenfilename(title='选择 UnrealEditor.exe',filetypes=[('Unreal 编辑器','UnrealEditor.exe')])
         if path:
-            try:core.validate_engine(path);self.engine.set(path);self.save_settings()
-            except Exception as error:messagebox.showerror('引擎不匹配',str(error),parent=self)
+            # Retain the user's selection even when its metadata needs repair.
+            self.engine.set(path);self.save_settings()
+            try:
+                self.selected_engine();self.status.set('已选择引擎。点击“检测兼容性”检查具体构建。')
+            except Exception as error:self.show_error('引擎信息读取失败',error)
+
+    def selected_engine(self):
+        engine=str(core.validate_engine(self.engine.get()))
+        self.engine.set(engine);self.save_settings()
+        return engine
+
+    def show_error(self,title,error):
+        log_error(traceback.format_exc())
+        self.status.set(str(error));messagebox.showerror(title,str(error),parent=self)
 
     def worker(self,job,done,mutation=True):
         if mutation and self.busy:return
@@ -252,14 +272,11 @@ class App(tk.Tk):
                 if event[0]=='done':
                     try:event[1](event[2])
                     except Exception as error:
-                        self.status.set(str(error));messagebox.showerror('操作未完成',str(error),parent=self)
+                        self.show_error('操作未完成',error)
                 else:
                     self.status.set(event[1]);self.progress['value']=0
+                    log_error(event[2])
                     if event[-1]:messagebox.showerror('操作未完成',event[1],parent=self)
-                    try:
-                        STATE.mkdir(parents=True,exist_ok=True)
-                        with (STATE/'launcher.log').open('a',encoding='utf-8') as log:log.write(time.strftime('%Y-%m-%d %H:%M:%S')+'\n'+event[2]+'\n')
-                    except OSError:pass
         except queue.Empty:pass
         if not self.closing:self._pump_after=self.after(80,self.pump)
 
@@ -297,11 +314,9 @@ class App(tk.Tk):
 
     def install(self,offline_only=False):
         try:
-            info=core.project_info(self.project.get());engine=self.engine.get()
-            if engine:core.validate_engine(engine)
-            else:raise ValueError('请选择对应的 UnrealEditor.exe，确认 UE 版本后再安装。')
+            info=core.project_info(self.project.get());engine=self.selected_engine()
             origin,item=self.package_choice(offline_only);project=str(info['file']);self.save_settings()
-        except Exception as error:messagebox.showerror('请先完成设置',str(error),parent=self);return
+        except Exception as error:self.show_error('安装准备未完成',error);return
         if not messagebox.askyesno('确认安装插件','将安装插件 '+item['version']+' 到：\n'+str(info['plugin'])+'\n\n如有此版本的已验证本机适配包，会一并使用。旧插件会备份到该工程 Saved/VFXMeshGenerator。\n首次安装或原生组件更新需先保存并关闭该工程。是否继续？',parent=self):return
         self.status.set('正在校验并安装插件，请稍等…');self.progress['value']=0
         def job():
@@ -321,9 +336,10 @@ class App(tk.Tk):
         if self.busy:
             self._compat_after=self.after(1000,self.startup_compatibility);return
         try:
-            engine=str(core.validate_engine(self.engine.get()))
+            engine=self.selected_engine()
             item=core.read_json(BASE/'offline/manifest.json')['plugin'];archive=BASE/'offline'/item['file']
-        except Exception as error:self.status.set('自动兼容性检测未完成：'+str(error));return
+        except Exception as error:
+            log_error(traceback.format_exc());self.status.set('自动兼容性检测未完成：'+str(error));return
         def done(report):
             result=report['engine']
             if result['compatible']:
@@ -340,9 +356,9 @@ class App(tk.Tk):
 
     def compile_adapter(self,confirmed=False):
         try:
-            engine=str(core.validate_engine(self.engine.get()))
+            engine=self.selected_engine()
             item=core.read_json(BASE/'offline/manifest.json')['plugin'];archive=BASE/'offline'/item['file']
-        except Exception as error:messagebox.showerror('请先选择引擎',str(error),parent=self);return
+        except Exception as error:self.show_error('编译准备未完成',error);return
         def ready(config):
             if not confirmed and not messagebox.askyesno('开始本机编译适配',config['version']+'\n引擎：'+engine+'\n\n将使用所选引擎的开发文件和 UE 检测到的 C++ 工具链编译内置插件 '+item['version']+'。\n工作目录：'+str(STATE/'NativeBuilds')+'\n\n随后会启动独立空工程，检查预览、材质和重复开关。首次可能需要数分钟；验证通过后才可安装。是否开始？',parent=self):return
             def done(result):
@@ -362,10 +378,10 @@ class App(tk.Tk):
 
     def export_diagnostic(self):
         try:
-            engine=str(core.validate_engine(self.engine.get()))
+            engine=self.selected_engine()
             offline=core.read_json(BASE/'offline/manifest.json')['plugin'];archive=BASE/'offline'/offline['file']
             if core.digest(archive)!=offline['sha256']:raise ValueError('内置安装包校验失败，请重新完整解压启动器。')
-        except Exception as error:messagebox.showerror('诊断未完成',str(error),parent=self);return
+        except Exception as error:self.show_error('诊断未完成',error);return
         path=filedialog.asksaveasfilename(title='保存引擎与更新诊断（不含项目资产）',defaultextension='.json',
             initialfile='VFXMesh-diagnostic.json',filetypes=[('诊断报告','*.json')])
         if not path:return
@@ -380,10 +396,10 @@ class App(tk.Tk):
 
     def check_compatibility(self):
         try:
-            engine=str(core.validate_engine(self.engine.get()))
+            engine=self.selected_engine()
             item=core.read_json(BASE/'offline/manifest.json')['plugin'];archive=BASE/'offline'/item['file']
             if core.digest(archive)!=item['sha256']:raise ValueError('内置安装包校验失败，请重新完整解压启动器。')
-        except Exception as error:messagebox.showerror('无法检测',str(error),parent=self);return
+        except Exception as error:self.show_error('兼容性检测未完成',error);return
         def done(report):
             result=report['engine'];window=tk.Toplevel(self);window.title('引擎兼容性检测');window.geometry('790x560');window.minsize(650,440)
             window.transient(self);window.configure(bg=BG)

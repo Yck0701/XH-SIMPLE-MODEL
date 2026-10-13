@@ -55,8 +55,8 @@ def main():
     launcher=release/f'VFXMeshLauncher-{VERSION}-Windows.zip'
     zip_tree(bundle,launcher,'VFXMeshLauncher')
     base=f'https://github.com/{REPOSITORY}/releases/download/vfx-v{VERSION}/'
-    feed={'schema':1,'product':'VFXMeshGenerator','repository':REPOSITORY,'engine':'5.8','minimum_launcher':'1.5.4',
-        'notes':'保存按钮更醒目：左侧绿色保存模型，右侧蓝色保存材质，按钮下方显示保存状态；切换环境页仍可保存材质。左侧新增可折叠教程，涵盖快速开始、模型保存、材质保存、Niagara 和预览操作。模型与材质仍分别弹窗确认，只保存指定资产。保留 1.5.4 的自动兼容性检测和本机编译适配。'}
+    feed={'schema':1,'product':'VFXMeshGenerator','repository':REPOSITORY,'engine':'5.8','minimum_launcher':'1.5.6',
+        'notes':'请先更新启动器到 1.5.6。修复引擎信息读取失败后路径未保留、错误被误提示为选择引擎的问题；支持路径引号、首尾空格和引擎目录。UE 描述文件支持注释及尾逗号，JSON 错误显示具体文件与行列，日志在弹窗前保存。继续严格校验版本、BuildId、DLL 和安装包；不改写工程与引擎描述文件。'}
     for key,file in [('plugin',plugin),('launcher',launcher)]:
         feed[key]={'version':VERSION,'url':base+file.name,'sha256':core.digest(file),'size':file.stat().st_size}
     core.validate_feed(feed);core.write_json(release/'vfx-manifest.json',feed)
