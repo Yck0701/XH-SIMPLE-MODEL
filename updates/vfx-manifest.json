@@ -3,18 +3,18 @@
   "product": "VFXMeshGenerator",
   "repository": "Yck0701/XH-SIMPLE-MODEL",
   "engine": "5.8",
-  "minimum_launcher": "1.5.6",
-  "notes": "请先更新启动器到 1.5.6。修复引擎信息读取失败后路径未保留、错误被误提示为选择引擎的问题；支持路径引号、首尾空格和引擎目录。UE 描述文件支持注释及尾逗号，JSON 错误显示具体文件与行列，日志在弹窗前保存。继续严格校验版本、BuildId、DLL 和安装包；不改写工程与引擎描述文件。",
+  "minimum_launcher": "1.5.7",
+  "notes": "请先更新启动器到 1.5.7。增强工程关联、附近目录、注册表、Epic 安装记录与每工程引擎记忆；更换选择自动检测，多候选明确列出。新增一键编译、独立验证和安装确认的连续流程，支持取消、耗时和失败重试。新增三款 PNG/ICO 图标。保留 UE 5.8、版本、BuildId、DLL 指纹与安装包校验，不改写工程关联或引擎文件。",
   "plugin": {
-    "version": "1.5.6",
-    "url": "https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.6/VFXMeshGenerator-1.5.6-UE5.8.zip",
-    "sha256": "91ac30135c30547929b85a35e54306145fbf462e373312a7f5aae3e1c0846613",
-    "size": 486660
+    "version": "1.5.7",
+    "url": "https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.7/VFXMeshGenerator-1.5.7-UE5.8.zip",
+    "sha256": "b9b742d8f71c97fd9f51014eb22643108bae3650bf5d12824a85f74a44967956",
+    "size": 487185
   },
   "launcher": {
-    "version": "1.5.6",
-    "url": "https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.6/VFXMeshLauncher-1.5.6-Windows.zip",
-    "sha256": "8e1761de106797f2021a30644e0b89c08eca0734f3368d9c40a31752b01ab7c8",
-    "size": 14156267
+    "version": "1.5.7",
+    "url": "https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.7/VFXMeshLauncher-1.5.7-Windows.zip",
+    "sha256": "66fb4424d30ccf8a32faeaecec8863a781002d15264845d09cfb80e74e574bbf",
+    "size": 19346466
   }
 }
