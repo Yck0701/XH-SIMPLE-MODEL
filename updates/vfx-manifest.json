@@ -4,17 +4,17 @@
   "repository": "Yck0701/XH-SIMPLE-MODEL",
   "engine": "5.8",
   "minimum_launcher": "1.2.0",
-  "notes": "稳定性修复：原生适配组件统一使用 UE 内存分配器，修复旧预览回收崩溃；释放旧面板事件和视图。材质预览复用网格，减少重复生成与引擎文件校验。增加回调防重入和工程写入路径检查，阻断链接目录写入。此次包含原生组件与通信更新，请保存自己的工作并关闭工程后安装。",
+  "notes": "新增只读兼容性检测与差异报告，保留 BuildId 和 DLL 校验，逐类给出解决方案。更新检查与下载增加 GitHub 官方备用通道和重试；网络失败显示原因，支持内置离线安装和浏览器下载。本版原生组件与 1.5.2 相同；从 1.5.1 或更早版本升级仍需关闭对应工程。",
   "plugin": {
-    "version": "1.5.2",
-    "url": "https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.2/VFXMeshGenerator-1.5.2-UE5.8.zip",
-    "sha256": "d12ff95d6b7f58ff5dd9687ff0503db1f3511b4e9b56ccf4c50e2ebe049b6079",
-    "size": 348062
+    "version": "1.5.3",
+    "url": "https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.3/VFXMeshGenerator-1.5.3-UE5.8.zip",
+    "sha256": "3e57135a15dd0c7d355fc6fe869e5b29027847165f680ee1b25b747a80796303",
+    "size": 348686
   },
   "launcher": {
-    "version": "1.5.2",
-    "url": "https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.2/VFXMeshLauncher-1.5.2-Windows.zip",
-    "sha256": "c0377dd3590b56680f491670abe149d581576a7e60e4a0f77b054f67cefb0166",
-    "size": 13973139
+    "version": "1.5.3",
+    "url": "https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.3/VFXMeshLauncher-1.5.3-Windows.zip",
+    "sha256": "20586bd789590286a56dc8d2a91c4e08bc16d403455e8c312b8aee135f0c55a2",
+    "size": 13985408
   }
 }
