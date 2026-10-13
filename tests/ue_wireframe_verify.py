@@ -4,7 +4,7 @@ from pathlib import Path
 import unreal
 from vfx_mesh import runtime,preview
 root=Path(unreal.Paths.project_dir()).resolve()
-assert root.name in ('vfx140-stock','vfx140-native')
+assert root.name in ('vfx140-stock','vfx140-native','vfx150-stock','vfx150-native')
 p=runtime._panel
 fn=preview.native().VFX_WireInfo
 fn.argtypes=[ctypes.c_wchar_p,ctypes.POINTER(ctypes.c_double)];fn.restype=ctypes.c_int

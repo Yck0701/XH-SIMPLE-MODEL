@@ -20,11 +20,13 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/SWindow.h"
 #include "MaterialDetails.h"
+#include "Environment.h"
+#include "Layout.h"
 
 class FVFXViewportClient : public FEditorViewportClient
 {
 public:
-    TSharedPtr<FAdvancedPreviewScene> Scene;
+    TSharedPtr<FVFXPreviewScene> Scene;
     FBox MeshBox=FBox(FVector(-100),FVector(100));
     bool bAxes=true;
     bool bTurntable=false;
@@ -32,7 +34,7 @@ public:
     float WireOpacity=.35f;
     int WireDraws=0,WireSegments=0;
     TArray<TPair<FVector,FVector>> Edges;
-    FVFXViewportClient(TSharedPtr<FAdvancedPreviewScene> InScene,TSharedRef<SEditorViewport> Widget)
+    FVFXViewportClient(TSharedPtr<FVFXPreviewScene> InScene,TSharedRef<SEditorViewport> Widget)
         :FEditorViewportClient(nullptr,InScene.Get(),Widget),Scene(InScene)
     {
         SetViewMode(VMI_Lit);SetRealtime(true);bSetListenerPosition=false;
@@ -50,7 +52,9 @@ public:
     virtual bool InputKey(const FInputKeyEventArgs& Args) override
     {
         if(Args.Key==EKeys::F && Args.Event==IE_Pressed){Focus();return true;}
-        return Scene->HandleInputKey(Args)||FEditorViewportClient::InputKey(Args);
+        // Shared profile navigation shortcuts write per-project user settings.
+        // Environment editing here is confined to the workspace's local profile.
+        return FEditorViewportClient::InputKey(Args);
     }
     virtual bool InputAxis(const FInputKeyEventArgs& Args) override
     {
@@ -135,12 +139,14 @@ class SVFXNativeViewport : public SEditorViewport
 {
 public:
     SLATE_BEGIN_ARGS(SVFXNativeViewport){}SLATE_END_ARGS()
-    TSharedPtr<FAdvancedPreviewScene> Scene;
+    TSharedPtr<FVFXPreviewScene> Scene;
     TSharedPtr<FVFXViewportClient> VFXClient;
     UDynamicMeshComponent* Mesh=nullptr;
+    UMeshComponent* External=nullptr;
+    bool CastShadow=true;
     void Construct(const FArguments&)
     {
-        Scene=MakeShared<FAdvancedPreviewScene>(FPreviewScene::ConstructionValues());
+        Scene=MakeShared<FVFXPreviewScene>();
         Mesh=NewObject<UDynamicMeshComponent>(GetTransientPackage(),NAME_None,RF_Transient);
         Scene->AddComponent(Mesh,FTransform::Identity);
         SEditorViewport::Construct(SEditorViewport::FArguments());
@@ -151,9 +157,18 @@ public:
     }
     void Update(UDynamicMesh* Dynamic,UMaterialInterface* Material,bool bFrame)
     {
+        if(External){Scene->RemoveComponent(External);External=nullptr;}
+        Mesh->SetVisibility(true);Mesh->SetCastShadow(CastShadow);
         Mesh->SetDynamicMesh(Dynamic);Mesh->SetMaterial(0,Material?Material:UMaterial::GetDefaultMaterial(MD_Surface));
         Mesh->UpdateBounds();Mesh->MarkRenderStateDirty();VFXClient->MeshBox=Mesh->Bounds.GetBox();
+        SetEdges(Dynamic);
+        Scene->MeshBottom=float(VFXClient->MeshBox.Min.Z);Scene->PlaceFloor();
+        if(bFrame)VFXClient->Focus();Invalidate();
+    }
+    void SetEdges(UDynamicMesh* Dynamic)
+    {
         VFXClient->Edges.Reset();
+        if(!Dynamic)return;
         Dynamic->ProcessMesh([this](const UE::Geometry::FDynamicMesh3& Data)
         {
             VFXClient->Edges.Reserve(Data.EdgeCount());
@@ -163,7 +178,18 @@ public:
                 VFXClient->Edges.Emplace(Data.GetVertex(Pair.A),Data.GetVertex(Pair.B));
             }
         });
-        Scene->SetFloorOffset(float(-VFXClient->MeshBox.Min.Z));
+    }
+    void SetExternal(UMeshComponent* Component,UDynamicMesh* Topology,bool bFrame)
+    {
+        Mesh->SetVisibility(false);
+        if(External!=Component)
+        {
+            if(External)Scene->RemoveComponent(External);
+            External=Component;Scene->AddComponent(Component,FTransform::Identity);
+        }
+        External->SetCastShadow(CastShadow);External->UpdateBounds();
+        VFXClient->MeshBox=External->Bounds.GetBox();SetEdges(Topology);
+        Scene->MeshBottom=float(VFXClient->MeshBox.Min.Z);Scene->PlaceFloor();
         if(bFrame)VFXClient->Focus();Invalidate();
     }
 };
@@ -198,7 +224,7 @@ extern "C" __declspec(dllexport) int VFX_Attach(const wchar_t* HostPath)
         if(auto Window=FSlateApplication::Get().FindWidgetWindow(Cached.ToSharedRef()))
         {
             const FVector2D Size=Window->GetSizeInScreen();
-            if(Size.X<1320 || Size.Y<760)Window->Resize(FVector2D(1600,900));
+            if(Size.X<1180 || Size.Y<720)Window->Resize(FVector2D(1600,900));
         }
     }
     return 1;
@@ -216,7 +242,23 @@ extern "C" __declspec(dllexport) int VFX_Options(const wchar_t* HostPath,int Axe
     auto* Weak=Viewports.Find(HostPath);auto View=Weak?Weak->Pin():nullptr;if(!View)return 0;
     View->VFXClient->SetAxes(Axes!=0);View->VFXClient->SetGrid(Grid!=0);
     View->VFXClient->bTurntable=Turntable!=0;
+    auto* Profile=View->Scene->GetCurrentProfile();Profile->bShowFloor=Floor!=0;Profile->bShowEnvironment=Environment!=0;
     View->Scene->SetFloorVisibility(Floor!=0,true);View->Scene->SetEnvironmentVisibility(Environment!=0,true);
+    View->Invalidate();return 1;
+}
+extern "C" __declspec(dllexport) int VFX_SetComponent(const wchar_t* HostPath,const wchar_t* ComponentPath,const wchar_t* TopologyPath,int Frame)
+{
+    if(!IsInGameThread())return 0;
+    auto* Weak=Viewports.Find(HostPath);auto View=Weak?Weak->Pin():nullptr;
+    auto* Component=FindObject<UMeshComponent>(nullptr,ComponentPath);if(!View||!Component)return 0;
+    View->SetExternal(Component,FindObject<UDynamicMesh>(nullptr,TopologyPath),Frame!=0);return 1;
+}
+extern "C" __declspec(dllexport) int VFX_Shadow(const wchar_t* HostPath,int Enabled)
+{
+    if(!IsInGameThread())return 0;
+    auto* Weak=Viewports.Find(HostPath);auto View=Weak?Weak->Pin():nullptr;if(!View)return 0;
+    View->CastShadow=Enabled!=0;View->Mesh->SetCastShadow(View->CastShadow);
+    if(View->External)View->External->SetCastShadow(View->CastShadow);
     View->Invalidate();return 1;
 }
 extern "C" __declspec(dllexport) int VFX_Focus(const wchar_t* HostPath)
@@ -250,4 +292,27 @@ extern "C" __declspec(dllexport) int VFX_WireInfo(const wchar_t* HostPath,double
     Values[0]=View->VFXClient->Edges.Num();Values[1]=View->VFXClient->bWireframe;Values[2]=View->VFXClient->WireDraws;
     Values[3]=View->VFXClient->WireSegments;
     return 1;
+}
+extern "C" __declspec(dllexport) int VFX_EnvironmentGet(const wchar_t* HostPath,double* Values,wchar_t* CubePath,int Capacity)
+{
+    if(!IsInGameThread() || !Values || !CubePath || Capacity<1)return 0;
+    auto* Weak=Viewports.Find(HostPath);auto View=Weak?Weak->Pin():nullptr;if(!View)return 0;
+    View->Scene->Read(Values);
+    FCString::Strncpy(CubePath,*View->Scene->GetCurrentProfile()->EnvironmentCubeMap.ToString(),Capacity);return 1;
+}
+extern "C" __declspec(dllexport) int VFX_EnvironmentSet(const wchar_t* HostPath,const double* Values,const wchar_t* CubePath)
+{
+    if(!IsInGameThread())return 0;
+    auto* Weak=Viewports.Find(HostPath);auto View=Weak?Weak->Pin():nullptr;if(!View)return 0;
+    if(!View->Scene->Apply(Values,CubePath))return 0;
+    View->Invalidate();return 1;
+}
+// Read-only diagnostic for isolation regression tests; no profile/config writes.
+extern "C" __declspec(dllexport) unsigned int VFX_GlobalEnvironmentHash()
+{
+    if(!IsInGameThread())return 0;
+    FString Text;
+    for(const auto& Profile:UAssetViewerSettings::Get()->Profiles)
+        FPreviewSceneProfile::StaticStruct()->ExportText(Text,&Profile,nullptr,nullptr,PPF_None,nullptr);
+    return FCrc::StrCrc32(*Text);
 }

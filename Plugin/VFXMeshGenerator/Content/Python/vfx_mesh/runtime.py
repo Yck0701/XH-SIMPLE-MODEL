@@ -1,9 +1,10 @@
 """Compact editor workspace with isolated preview and explicit single-asset saves."""
 import copy
+import ctypes
 import time
 import traceback
 import unreal
-from . import geometry, engine, preview, material_sidebar
+from . import geometry, engine, preview, material_sidebar, environment_sidebar, model_sidebar
 
 WIDGET='/VFXMeshGenerator/UI/EUW_VFXMesh'
 TAB='VFXMeshGenerator.Workspace'
@@ -14,18 +15,19 @@ _next_tab_check=0.
 _tab_open=False
 
 
-@unreal.uclass()
-class VFXUserMaterialSettings(unreal.Object):
-    material=unreal.uproperty(unreal.MaterialInterface,meta={'Category':'当前材质','DisplayName':'材质 / 材质实例'})
+from .settings_types import VFXUserMaterialSettings
 
 
 class Panel:
     def __init__(self,widget):
         self.widget=widget;self.mesh=None;self.settings=geometry.defaults()
+        self.custom_mesh=None;self.imported_assets=[]
         self.surface={'mode':'custom','material':''};self.live=True;self.loading=True
         self.pending=None;self.geometry_dirty=False;self.surface_dirty=False
         self.history=[];self.last_applied=None;self.unsaved=False
         self.controls={};self.rows={};self.refs=[]
+        self.sections={};self.left_visible=True;self.right_visible=True;self.sidebar_tab='material'
+        self.layout_attached=False;self.layout_sizes=[.21,.54,.25]
         self.root=widget.find_child_widget_by_name('VerticalBox_0')
         if not self.root:raise RuntimeError('插件面板模板缺失。')
         self.root.clear_children();self.build_ui();self.loading=False;self.last_tick=time.monotonic();self.last_applied=self.snapshot()
@@ -45,17 +47,39 @@ class Panel:
 
     def fill(self,slot):slot.set_size(unreal.SlateChildSize(size_rule=unreal.SlateSizeRule.FILL))
 
-    def text(self,parent,label,size=10,color=None):
+    def text(self,parent,label,size=10,color=None,wrap=True):
         obj=self.obj(unreal.TextBlock);obj.set_text(label)
         font=obj.get_editor_property('font');font.set_editor_property('size',size);obj.set_font(font)
-        obj.set_auto_wrap_text(True)
+        obj.set_auto_wrap_text(wrap)
+        if not wrap:
+            obj.set_tool_tip_text(label)
+            obj.set_editor_property('text_overflow_policy',unreal.TextOverflowPolicy.ELLIPSIS)
         if color:obj.set_color_and_opacity(unreal.SlateColor(specified_color=unreal.LinearColor(*color)))
         self.add(parent,obj);return obj
 
-    def heading(self,parent,label):return self.text(parent,label,11,(.35,.8,.75,1))
+    def heading(self,parent,label):return self.text(parent,label,11,(.35,.8,.75,1),False)
+
+    def section(self,parent,key,title,expanded=True):
+        button=self.obj(unreal.Button);self.add(parent,button,2)
+        label=self.text(button,('- ' if expanded else '+ ')+title,11,(.35,.8,.75,1),False)
+        body=self.obj(unreal.VerticalBox);self.add(parent,body,2)
+        self.sections[key]=(body,label,title)
+        self.expand_section(key,expanded)
+        button.on_clicked.add_callable(lambda:self.expand_section(key,body.get_visibility()==unreal.SlateVisibility.COLLAPSED))
+        return body
+
+    def expand_section(self,key,expanded):
+        body,label,title=self.sections[key]
+        body.set_visibility(unreal.SlateVisibility.VISIBLE if expanded else unreal.SlateVisibility.COLLAPSED)
+        label.set_text(('- ' if expanded else '+ ')+title)
+
+    def switch_sidebar(self,tab):
+        self.sidebar_tab=tab;self.sidebar_switcher.set_active_widget_index(0 if tab=='material' else 1)
+        for key,button in self.sidebar_buttons.items():
+            button.set_background_color(unreal.LinearColor(.08,.3,.3,1) if key==tab else unreal.LinearColor(.1,.12,.15,1))
 
     def button(self,parent,label,action,tip=''):
-        b=self.obj(unreal.Button);self.text(b,label)
+        b=self.obj(unreal.Button);self.text(b,label,wrap=False)
         if tip:b.set_tool_tip_text(tip)
         b.on_clicked.add_callable(lambda:self.safe(action));self.add(parent,b,2);return b
 
@@ -64,12 +88,12 @@ class Panel:
         except Exception as error:
             self.pending=None;self.status.set_text(str(error));unreal.log_warning('[VFX Mesh] '+traceback.format_exc())
 
-    def row(self,parent,label,width=90):
+    def row(self,parent,label,width=120):
         row=self.obj(unreal.HorizontalBox);self.add(parent,row,1)
-        box=self.obj(unreal.SizeBox);box.set_width_override(width);self.add(row,box,0);self.text(box,label)
+        box=self.obj(unreal.SizeBox);box.set_width_override(width);self.add(row,box,0);self.text(box,label,wrap=False)
         return row
 
-    def spin(self,parent,key,label,value,lo,hi,target='geometry',width=90):
+    def spin(self,parent,key,label,value,lo,hi,target='geometry',width=120):
         row=self.row(parent,label,width);obj=self.obj(unreal.SpinBox)
         obj.set_min_value(float(lo));obj.set_max_value(float(hi));obj.set_min_slider_value(float(lo))
         obj.set_max_slider_value(float(min(hi,max(1000,value*3))))
@@ -82,7 +106,7 @@ class Panel:
         return obj
 
     def check(self,parent,key,label,value,target='geometry'):
-        obj=self.obj(unreal.CheckBox);obj.set_is_checked(value);self.text(obj,label)
+        obj=self.obj(unreal.CheckBox);obj.set_is_checked(value);self.text(obj,label,wrap=False)
         obj.on_check_state_changed.add_callable(lambda v:self.change(target,key,v))
         self.add(parent,obj);self.controls[(target,key)]=obj;self.rows[(target,key)]=obj;return obj
 
@@ -97,85 +121,122 @@ class Panel:
     def build_ui(self):
         border=self.obj(unreal.Border);border.set_padding(unreal.Margin(8,8,8,8));border.set_brush_color(unreal.LinearColor(.018,.023,.029,1))
         self.fill(self.add(self.root,border,0))
-        minimum=self.obj(unreal.SizeBox);minimum.set_min_desired_width(1320);minimum.set_min_desired_height(760);border.add_child(minimum)
+        minimum=self.obj(unreal.SizeBox);minimum.set_min_desired_width(1180);minimum.set_min_desired_height(720);border.add_child(minimum)
         body=self.obj(unreal.VerticalBox);minimum.add_child(body)
         top=self.obj(unreal.HorizontalBox);self.add(body,top)
-        self.text(top,'特效网格工作台',14)
-        self.button(top,'新建预览',self.new)
-        self.button(top,'载入所选模型',self.load_selected)
-        self.button(top,'保存模型…',self.save,'每次确认后只保存当前模型，不保存材质或其他脏资产')
-        self.button(top,'定位模型',self.locate)
-        self.asset_label=self.text(body,'预览草稿 · 尚未创建资产',10,(.65,.7,.75,1))
-        columns=self.obj(unreal.HorizontalBox);self.fill(self.add(body,columns))
-        left_box=self.obj(unreal.SizeBox);left_box.set_width_override(300);self.add(columns,left_box,3)
+        self.text(top,'特效网格工作台',14,wrap=False)
+        self.button(top,'新建参数模型',self.new,'新建可调整形状的预览草稿；保存确认后才创建资产')
+        self.button(top,'载入所选网格',self.load_selected,'从内容浏览器载入所选网格：本工具生成的模型可继续调参，其他模型进入自定义预览')
+        self.save_button=self.button(top,'保存生成模型…',self.save,'每次确认后只保存列出的目标资产')
+        self.locate_button=self.button(top,'定位模型',self.locate,'在内容浏览器定位当前已存在的网格资产')
+        self.button(top,'重置布局',self.reset_layout)
+        self.fill(self.add(top,self.obj(unreal.Spacer)))
+        self.check(top,'left_visible','模型参数',True,'layout');self.check(top,'right_visible','材质 / 环境',True,'layout')
+        self.asset_label=self.text(body,'预览草稿 · 尚未创建资产',10,(.65,.7,.75,1),False)
+        columns=self.obj(unreal.NativeWidgetHost);self.fill(self.add(body,columns));self.columns=columns
+        left_box=self.obj(unreal.SizeBox);self.left_box=left_box
         scroll=self.obj(unreal.ScrollBox);left_box.add_child(scroll);self.scroll=scroll
         left=self.obj(unreal.VerticalBox);scroll.add_child(left)
-        self.heading(left,'形状与尺寸 · cm')
-        self.combo(left,'shape','形状',[(k,v[0]) for k,v in geometry.KINDS.items()])
+        custom=self.section(left,'custom','自定义模型 / 动画',False)
+        self.model_sidebar=model_sidebar.Sidebar(self,custom)
+        actions=self.obj(unreal.HorizontalBox);self.add(left,actions)
+        self.geometry_actions=actions
+        self.check(actions,'live','实时更新',True,'options');self.button(actions,'应用',self.apply);self.button(actions,'撤回',self.undo)
+        shape=self.section(left,'shape','形状与尺寸 · cm')
+        self.combo(shape,'shape','形状',[(k,v[0]) for k,v in geometry.KINDS.items()])
         for key,field in geometry.FIELDS.items():
-            if type(field[1]) is bool:self.check(left,key,field[0],field[1])
-            else:self.spin(left,key,*field)
-        self.heading(left,'原点与变换')
-        self.combo(left,'pivot','原点',[('original','原始位置'),('center','包围盒中心'),('bottom','底部中心')])
-        self.combo(left,'direction','朝向',list(zip(geometry.PRESETS,['+Z','-Z','+X','-X','+Y','-Y'])))
-        self.check(left,'flip','翻转法线',False)
+            if type(field[1]) is bool:self.check(shape,key,field[0],field[1])
+            else:self.spin(shape,key,*field)
+        transform=self.section(left,'transform','原点与变换')
+        self.combo(transform,'pivot','原点',[('original','原始位置'),('center','包围盒中心'),('bottom','底部中心')])
+        self.combo(transform,'direction','朝向',list(zip(geometry.PRESETS,['+Z','-Z','+X','-X','+Y','-Y'])))
+        self.check(transform,'flip','翻转法线',False)
         for prefix,title,limit in [('r','旋转',360.),('t','位移',100000.)]:
-            row=self.obj(unreal.HorizontalBox);self.add(left,row)
+            row=self.obj(unreal.HorizontalBox);self.add(transform,row)
             self.text(row,title)
             for axis in 'xyz':
                 box=self.obj(unreal.VerticalBox);self.fill(self.add(row,box,0))
                 self.spin(box,prefix+axis,axis.upper(),0.,-limit,limit,width=16)
-        self.heading(left,'更新与撤回')
-        actions=self.obj(unreal.HorizontalBox);self.add(left,actions)
-        self.check(actions,'live','实时更新',True,'options')
-        self.button(actions,'应用',self.apply);self.button(actions,'撤回',self.undo)
-        self.heading(left,'UE 内容目录')
-        self.folder=self.obj(unreal.EditableTextBox);self.folder.set_text('/Game/VFXMeshes');self.folder.set_is_read_only(True);self.add(left,self.folder)
-        actions=self.obj(unreal.HorizontalBox);self.add(left,actions)
+        save=self.section(left,'save','保存位置 · UE 内容目录',False)
+        self.folder=self.obj(unreal.EditableTextBox);self.folder.set_text('/Game/VFXMeshes');self.folder.set_is_read_only(True);self.add(save,self.folder)
+        actions=self.obj(unreal.HorizontalBox);self.add(save,actions)
         self.button(actions,'浏览内容目录',self.browse_folder)
         self.button(actions,'使用所选目录',self.pick_folder)
-        self.name=self.obj(unreal.EditableTextBox);self.name.set_hint_text('模型名，留空自动命名');self.add(left,self.name)
-        self.text(left,'在内容浏览器选文件夹，再点“使用所选目录”。已有模型保存在原位置。',9,(.6,.65,.7,1))
-        right=self.obj(unreal.VerticalBox);self.fill(self.add(columns,right,5))
+        self.name=self.obj(unreal.EditableTextBox);self.name.set_hint_text('模型名，留空自动命名');self.add(save,self.name)
+        self.text(save,'在内容浏览器选文件夹，再点“使用所选目录”。已有模型保存在原位置。',9,(.6,.65,.7,1))
+        right=self.obj(unreal.VerticalBox);self.center_box=right
         actions=self.obj(unreal.HorizontalBox);self.add(right,actions)
         self.heading(actions,'实时预览')
         self.button(actions,'聚焦',lambda:self.viewer.frame())
         self.text(actions,'左键旋转 · 中键平移 · 滚轮 / 右键缩放 · F 聚焦',9,(.65,.7,.75,1))
         self.viewer=preview.Preview(self,right)
-        options=self.obj(unreal.HorizontalBox);self.add(right,options)
-        self.check(options,'wireframe','模型线框',False,'preview')
-        opacity=self.spin(options,'wire_opacity','不透明度 %',self.viewer.wire_opacity,0,100,'preview',80)
+        options=self.obj(unreal.WrapBox);self.add(right,options)
+        options.set_inner_slot_padding(unreal.Vector2D(4,3))
+        self.check(options,'wireframe','线框',False,'preview')
+        opacity=self.spin(options,'wire_opacity','不透明度 %',self.viewer.wire_opacity,0,100,'preview',70)
         opacity_tip='拖动或输入 0–100：0 完全隐藏，100 完全不透明。默认 35，仅影响预览线框。'
         opacity.set_tool_tip_text(opacity_tip)
-        slider_box=self.obj(unreal.SizeBox);slider_box.set_width_override(110);self.add(options,slider_box,4)
+        slider_box=self.obj(unreal.SizeBox);slider_box.set_width_override(90);self.add(options,slider_box,4)
         self.opacity_slider=self.obj(unreal.Slider);slider_box.add_child(self.opacity_slider)
         self.opacity_slider.set_min_value(0.);self.opacity_slider.set_max_value(100.);self.opacity_slider.set_step_size(1.)
         self.opacity_slider.set_value(float(self.viewer.wire_opacity));self.opacity_slider.set_tool_tip_text(opacity_tip)
         self.opacity_slider.on_value_changed.add_callable(lambda value:self.change('preview','wire_opacity',int(round(value))))
         self.controls[('preview','wireframe')].set_tool_tip_text('透视显示基础网格的全部三角布线（含背面），避免与材质表面发生深度冲突。仅用于预览。')
-        options=self.obj(unreal.HorizontalBox);self.add(right,options)
-        for key,label,value in [('axes','坐标轴 / 原点',True),('grid','网格',True),('floor','地板',True),('environment','环境',True),('turntable','自动旋转',False)]:self.check(options,key,label,value,'preview')
+        for key,label,value in [('axes','坐标轴',True),('grid','网格',True),('turntable','旋转',False),('cast_shadow','投射阴影',True)]:self.check(options,key,label,value,'preview')
+        self.controls[('preview','cast_shadow')].set_tool_tip_text('控制当前模型在预览中的投射阴影。Niagara 的阴影请在 Mesh Renderer 中设置。')
         self.preview_stats=self.text(right,'预览正在准备…',10,(.65,.7,.75,1))
-        self.text(right,'预览场景独立于当前关卡。保存后的模型可指定给 Niagara Mesh Renderer。',9,(.65,.7,.75,1))
-        material_box=self.obj(unreal.SizeBox);material_box.set_width_override(420);self.add(columns,material_box,4)
-        material_column=self.obj(unreal.VerticalBox);material_box.add_child(material_column)
-        self.heading(material_column,'材质细节')
+        material_box=self.obj(unreal.SizeBox);self.right_box=material_box
+        sidebar=self.obj(unreal.VerticalBox);material_box.add_child(sidebar)
+        tabs=self.obj(unreal.HorizontalBox);self.add(sidebar,tabs)
+        self.sidebar_buttons={key:self.button(tabs,title,lambda key=key:self.switch_sidebar(key)) for key,title in [('material','材质细节'),('environment','环境设置')]}
+        self.sidebar_switcher=self.obj(unreal.WidgetSwitcher);self.fill(self.add(sidebar,self.sidebar_switcher,0))
+        material_column=self.obj(unreal.VerticalBox);self.sidebar_switcher.add_child(material_column)
         self.pickers=VFXUserMaterialSettings();details=self.obj(unreal.DetailsView)
         details.set_editor_property('force_hidden_property_visibility',True);details.set_editor_property('allow_filtering',False)
         details.set_object(self.pickers);details.on_property_changed.add_callable(self.picker_changed);self.add(material_column,details)
-        actions=self.obj(unreal.HorizontalBox);self.add(material_column,actions)
-        self.button(actions,'使用所选材质',self.use_selected_material)
-        self.button(actions,'编辑当前材质',self.edit_material,'打开该材质或材质实例的 UE 原生编辑器')
         self.material_sidebar=material_sidebar.Sidebar(self,material_column)
+        environment_column=self.obj(unreal.VerticalBox);self.sidebar_switcher.add_child(environment_column)
+        self.environment_sidebar=environment_sidebar.Sidebar(self,environment_column)
+        self.switch_sidebar(self.sidebar_tab)
         self.status=self.text(body,'拖动参数即可预览；确认保存后才会新建模型资产。',10,(.65,.85,.7,1))
         self.visibility()
+
+    def ensure_layout(self):
+        dll=preview.native()
+        if self.layout_attached:
+            values=(ctypes.c_double*3)()
+            if dll.VFX_LayoutSizes(self.columns.get_path_name(),values,0):self.layout_sizes=list(values);return
+        if not dll.VFX_Layout(self.columns.get_path_name(),self.left_box.get_path_name(),self.center_box.get_path_name(),self.right_box.get_path_name(),(ctypes.c_double*3)(*self.layout_sizes)):
+            raise RuntimeError('无法创建可拖动分栏。')
+        self.layout_attached=True
+
+    def layout_snapshot(self):
+        values=(ctypes.c_double*3)()
+        if self.layout_attached and preview.native().VFX_LayoutSizes(self.columns.get_path_name(),values,0):return list(values)
+        return self.layout_sizes[:]
+
+    def reset_layout(self):
+        self.layout_sizes=[.21,.54,.25]
+        if self.layout_attached:preview.native().VFX_LayoutSizes(self.columns.get_path_name(),(ctypes.c_double*3)(*self.layout_sizes),1)
+        for key in ('left_visible','right_visible'):self.change('layout',key,True);self.controls[('layout',key)].set_is_checked(True)
 
     def visibility(self):
         fields=geometry.KINDS[self.settings['shape']][1]
         for key in geometry.FIELDS:self.rows[('geometry',key)].set_visibility(unreal.SlateVisibility.VISIBLE if key in fields else unreal.SlateVisibility.COLLAPSED)
+        for key in ('shape','transform'):self.sections[key][0].set_is_enabled(not self.custom_mesh)
+        self.geometry_actions.set_visibility(unreal.SlateVisibility.COLLAPSED if self.custom_mesh else unreal.SlateVisibility.VISIBLE)
+        if hasattr(self,'save_button'):
+            self.save_button.set_visibility(unreal.SlateVisibility.VISIBLE if not self.custom_mesh or self.imported_assets else unreal.SlateVisibility.COLLAPSED)
+            self.save_button.get_child_at(0).set_text('保存导入资产…' if self.custom_mesh else '保存生成模型…')
+            self.locate_button.set_is_enabled(bool(self.custom_mesh or self.mesh))
+        self.controls[('preview','wireframe')].set_is_enabled(not isinstance(self.custom_mesh,unreal.SkeletalMesh))
 
     def change(self,target,key,value):
         if self.loading:return
+        if target=='layout':
+            setattr(self,key,value)
+            (self.left_box if key=='left_visible' else self.right_box).set_visibility(unreal.SlateVisibility.VISIBLE if value else unreal.SlateVisibility.COLLAPSED)
+            return
         if target=='preview':
             setattr(self.viewer,key,value)
             if key=='wire_opacity':
@@ -198,6 +259,9 @@ class Panel:
         material=unreal.load_asset(path) if path else None
         if material and not isinstance(material,unreal.MaterialInterface):raise ValueError('请选择材质或材质实例。')
         return material
+
+    def preview_material(self):
+        return self.material_sidebar.material or self.current_material()
 
     def picker_changed(self,_):
         if self.loading:return
@@ -228,7 +292,7 @@ class Panel:
         try:
             labels={'shape':{k:v[0] for k,v in geometry.KINDS.items()},'pivot':{'original':'原始位置','center':'包围盒中心','bottom':'底部中心'},'direction':dict(zip(geometry.PRESETS,['+Z','-Z','+X','-X','+Y','-Y']))}
             for (target,key),control in self.controls.items():
-                value=getattr(self.viewer,key) if target=='preview' else self.live if target=='options' else self.settings[key]
+                value=getattr(self.viewer,key) if target=='preview' else getattr(self,key) if target=='layout' else self.live if target=='options' else self.settings[key]
                 if isinstance(control,unreal.SpinBox):control.set_value(float(value))
                 elif isinstance(control,unreal.CheckBox):control.set_is_checked(value)
                 else:control.set_selected_option(labels[key][value])
@@ -236,7 +300,7 @@ class Panel:
             self.pickers.set_editor_property('material',self.current_material());self.visibility()
         finally:self.loading=False
         self.material_sidebar.refresh()
-        self.viewer.update(self.settings,self.current_material())
+        self.viewer.update(self.settings,self.preview_material())
 
     def confirm(self,title,message):
         return unreal.EditorDialog.show_message(title,message,unreal.AppMsgType.YES_NO,unreal.AppReturnType.NO)==unreal.AppReturnType.YES
@@ -246,15 +310,24 @@ class Panel:
 
     def new(self):
         if not self.can_switch():return
-        self.mesh=None;self.settings=geometry.defaults();self.surface={'mode':'custom','material':''}
+        self.mesh=None;self.custom_mesh=None;self.imported_assets=[];self.model_sidebar.sync({'model':None,'animation':None,'use_animation':False})
+        self.settings=geometry.defaults();self.surface={'mode':'custom','material':''}
         self.history=[];self.last_applied=None;self.pending=None;self.unsaved=False
         self.geometry_dirty=self.surface_dirty=False;self.sync_controls();self.viewer.frame()
         self.last_applied=self.snapshot()
+        self.expand_section('shape',True);self.expand_section('transform',True)
+        self.expand_section('custom',False)
         self.asset_label.set_text('预览草稿 · 尚未创建资产');self.status.set_text('新建预览不会写入资产；满意后点击“保存模型…”。')
 
     def load_selected(self):
-        mesh=engine.selected();data=engine.read(mesh)
+        selected=[a for a in unreal.EditorUtilityLibrary.get_selected_assets() if isinstance(a,(unreal.StaticMesh,unreal.SkeletalMesh))]
+        if len(selected)!=1:raise ValueError('请在内容浏览器选中一个静态网格或骨骼网格。')
+        mesh=selected[0]
+        if not isinstance(mesh,unreal.StaticMesh) or not unreal.EditorAssetLibrary.get_metadata_tag(mesh,engine.TAG):
+            return self.load_custom(mesh)
+        data=engine.read(mesh)
         if not self.can_switch():return
+        self.custom_mesh=None;self.imported_assets=[];self.model_sidebar.sync({'model':None,'animation':None,'use_animation':False})
         self.mesh=mesh;self.settings=data['geometry'];material=mesh.get_material(0)
         self.surface={'mode':'custom','material':material.get_path_name() if material else ''}
         self.pending=None;self.history=[];self.last_applied=self.snapshot();self.unsaved=False
@@ -262,8 +335,30 @@ class Panel:
         self.asset_label.set_text(mesh.get_path_name());self.folder.set_text(mesh.get_path_name().rsplit('/',1)[0])
         self.status.set_text('已载入。实时调参更新同一个模型；保存需单独确认。')
 
+    def show_custom(self):
+        self.change('layout','left_visible',True);self.controls[('layout','left_visible')].set_is_checked(True)
+        self.expand_section('custom',True)
+
+    def load_custom(self,model,check=True):
+        if not isinstance(model,(unreal.StaticMesh,unreal.SkeletalMesh)):raise ValueError('请选择静态网格或骨骼网格。')
+        if check and not self.can_switch():return False
+        if model not in self.imported_assets:self.imported_assets=[]
+        self.mesh=None;self.custom_mesh=model
+        material=model.get_material(0) if isinstance(model,unreal.StaticMesh) else (model.materials[0].material_interface if model.materials else None)
+        self.surface={'mode':'custom','material':material.get_path_name() if material else ''}
+        self.history=[];self.pending=None;self.unsaved=False;self.geometry_dirty=self.surface_dirty=False
+        self.model_sidebar.sync({'model':model,'animation':None,'use_animation':False})
+        self.viewer.update_animation(self.model_sidebar.snapshot());self.sync_controls();self.viewer.frame();self.show_custom()
+        self.expand_section('shape',False);self.expand_section('transform',False)
+        self.asset_label.set_text('自定义模型预览 · '+model.get_path_name())
+        self.status.set_text('已载入自定义模型。材质替换和动画仅用于此预览，不改写原网格；材质实例参数可单独确认保存。')
+        return True
+
     def apply(self,record=True):
         self.pending=None;geometry.validate(self.settings);material=self.current_material()
+        if self.custom_mesh:
+            self.viewer.update(self.settings,self.preview_material());self.surface_dirty=False;self.unsaved=False
+            self.status.set_text('自定义模型预览已更新。原网格未改动。');return
         if self.mesh:
             if self.geometry_dirty:engine.update(self.mesh,self.settings,self.surface)
             if self.surface_dirty:
@@ -274,7 +369,7 @@ class Panel:
         if record and self.last_applied and current!=self.last_applied:
             self.history.append(self.last_applied);self.history=self.history[-20:]
         self.last_applied=current;self.geometry_dirty=self.surface_dirty=False
-        self.viewer.update(self.settings,material)
+        self.viewer.update(self.settings,self.preview_material())
         self.status.set_text('模型已更新，尚未保存。' if self.mesh else '预览已更新，尚未创建资产。')
 
     def undo(self):
@@ -295,6 +390,14 @@ class Panel:
         self.folder.set_text(engine.content_folder());self.status.set_text('新模型保存目录已从 UE 内容浏览器获取。')
 
     def save(self):
+        if self.custom_mesh:
+            assets=list(self.imported_assets)
+            if not assets:raise ValueError('当前为已有自定义模型的预览，无需重新保存网格。材质参数请在右侧单独保存。')
+            paths='\n'.join(a.get_path_name() for a in assets)
+            if not self.confirm('确认保存本次导入资产','仅保存本次导入的以下资产：\n'+paths+'\n\n不会保存关卡或其他脏资产。是否继续？'):return False
+            for asset in assets:
+                if not unreal.EditorAssetLibrary.save_loaded_asset(asset):raise RuntimeError('保存失败：'+asset.get_path_name())
+            self.imported_assets=[];self.visibility();self.status.set_text('已保存本次导入的指定资产。');return True
         geometry.validate(self.settings);self.current_material()
         path=self.mesh.get_path_name().split('.')[0] if self.mesh else engine.new_asset_path(self.settings,str(self.folder.get_text()),str(self.name.get_text()))
         if not self.confirm('确认保存当前模型','仅保存以下模型及其生成参数：\n'+path+'\n\n不会保存材质、关卡或其他脏资产。是否继续？'):
@@ -305,34 +408,51 @@ class Panel:
             self.mesh.set_material(0,self.current_material());self.last_applied=self.snapshot()
             self.pending=None;self.geometry_dirty=self.surface_dirty=False
         else:self.apply()
-        engine.save(self.mesh);self.unsaved=False;self.asset_label.set_text(self.mesh.get_path_name())
-        self.status.set_text('已保存当前模型。材质参数请点击侧栏“保存当前材质…”单独确认保存。');self.locate();return True
+        engine.save(self.mesh);self.unsaved=False;self.asset_label.set_text('已保存模型 · '+self.mesh.get_path_name());self.visibility()
+        self.status.set_text('已保存当前模型。材质参数请点击侧栏“保存材质…”单独确认保存。');self.locate();return True
 
     def locate(self):
-        if self.mesh:unreal.EditorAssetLibrary.sync_browser_to_objects([self.mesh.get_path_name()])
+        asset=self.custom_mesh or self.mesh
+        if asset:unreal.EditorAssetLibrary.sync_browser_to_objects([asset.get_path_name()])
 
     def tick(self):
+        self.ensure_layout()
         now=time.monotonic();dt=min(now-self.last_tick,.1);self.last_tick=now
         if self.pending is not None and now>=self.pending:self.safe(self.apply)
         self.material_sidebar.tick()
         self.viewer.tick(dt)
+        self.environment_sidebar.tick()
 
 
 def _restore(panel,old):
+    if hasattr(old,'layout_snapshot'):panel.layout_sizes=old.layout_snapshot()
     if hasattr(old,'material_sidebar'):old.material_sidebar.flush()
     if hasattr(old,'material_sidebar'):
         panel.material_sidebar.show_hidden=old.material_sidebar.show_hidden
         panel.material_sidebar.hidden.set_is_checked(old.material_sidebar.show_hidden)
-    for key in ('mesh','settings','surface','live','history','last_applied','geometry_dirty','surface_dirty','pending','unsaved'):
+    for key in ('mesh','custom_mesh','imported_assets','settings','surface','live','history','last_applied','geometry_dirty','surface_dirty','pending','unsaved'):
         if hasattr(old,key):setattr(panel,key,getattr(old,key))
     if hasattr(old,'viewer'):
-        for key in ('axes','grid','floor','environment','turntable','wireframe','wire_opacity'):
+        for key in ('axes','grid','floor','environment','turntable','wireframe','wire_opacity','cast_shadow'):
             if hasattr(old.viewer,key):setattr(panel.viewer,key,getattr(old.viewer,key))
+    if hasattr(old,'model_sidebar'):
+        state=old.model_sidebar.snapshot();panel.model_sidebar.sync(state);panel.viewer.update_animation(state)
+    if hasattr(old,'environment_sidebar'):
+        panel.environment_sidebar.pending=old.environment_sidebar.snapshot()
+        panel.environment_sidebar.defaults=copy.deepcopy(old.environment_sidebar.defaults)
+    for key in ('left_visible','right_visible'):
+        if hasattr(old,key):panel.change('layout',key,getattr(old,key))
+    for key,(body,_,_) in getattr(old,'sections',{}).items():
+        if key in panel.sections:panel.expand_section(key,body.get_visibility()!=unreal.SlateVisibility.COLLAPSED)
+    panel.switch_sidebar(getattr(old,'sidebar_tab','material'))
     if panel.mesh:
         material=panel.mesh.get_material(0)
         if panel.surface.get('mode')!='custom':panel.surface={'mode':'custom','material':material.get_path_name() if material else ''}
         panel.asset_label.set_text(panel.mesh.get_path_name())
     panel.folder.set_text(old.folder.get_text());panel.name.set_text(old.name.get_text());panel.sync_controls()
+    if hasattr(old.material_sidebar,'restore'):
+        panel.material_sidebar.restore(old.material_sidebar)
+        panel.viewer.update(panel.settings,panel.preview_material())
 
 
 def open_panel():

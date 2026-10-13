@@ -34,7 +34,7 @@ _loaded_version = _version()
 
 def _reload():
     global _loaded_version, _recovery_panel
-    from . import runtime, geometry, engine, preview, material_sidebar
+    from . import runtime, geometry, engine, preview, material_sidebar, environment_sidebar, model_sidebar
     old = _recovery_panel or runtime._panel
     if old and hasattr(old,'material_sidebar'):old.material_sidebar.flush()
     _recovery_panel = old
@@ -43,7 +43,7 @@ def _reload():
         unreal.unregister_slate_post_tick_callback(runtime._watch)
         runtime._watch = None
     importlib.invalidate_caches()
-    for module in (geometry, engine, preview, material_sidebar, runtime):
+    for module in (geometry, engine, preview, material_sidebar, environment_sidebar, model_sidebar, runtime):
         importlib.reload(module)
     runtime.startup()
     if old:

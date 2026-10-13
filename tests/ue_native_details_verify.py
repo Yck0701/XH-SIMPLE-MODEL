@@ -4,7 +4,7 @@ from pathlib import Path
 import unreal
 from vfx_mesh import runtime,launcher_bridge
 root=Path(unreal.Paths.project_dir()).resolve()
-assert root.name in ('vfx140-stock','vfx140-native')
+assert root.name in ('vfx140-stock','vfx140-native','vfx150-stock','vfx150-native')
 def files():
     return {f.relative_to(root).as_posix():hashlib.sha256(f.read_bytes()).hexdigest()
             for base in ('Content','Config') for f in (root/base).rglob('*') if f.is_file()}
@@ -36,14 +36,17 @@ mi=assets.create_asset('MI_NativeDetails',folder,unreal.MaterialInstanceConstant
 lib.set_material_instance_parent(mi,parent);assert unreal.EditorAssetLibrary.save_loaded_asset(mi)
 parent.set_editor_property('two_sided',True)
 p.pickers.set_editor_property('material',mi);p.picker_changed(None);p.apply();p.material_sidebar.tick()
+confirm_live=p.confirm;p.confirm=lambda *args:True
+assert p.material_sidebar.set_live(True)
+p.confirm=confirm_live;p.material_sidebar.tick()
 assert p.material_sidebar.attached
 saved=files();lib.set_material_instance_scalar_parameter_value(mi,'Roughness',.64)
 p.material_sidebar.refresh(True)
 assert files()==saved
 confirm=p.confirm;p.confirm=lambda *args:False
-assert p.material_sidebar.save() is False and files()==saved
+assert p.material_sidebar.save('replace') is False and files()==saved
 p.confirm=lambda *args:True
-assert p.material_sidebar.save() is True
+assert p.material_sidebar.save('replace') is True
 assert changed(saved)=={asset_file(mi)},changed(saved)
 saved=files();lib.set_material_instance_scalar_parameter_value(mi,'Roughness',.31)
 p.material_sidebar.refresh(True);p.settings['radius']=173.;p.geometry_dirty=True;p.apply()

@@ -96,6 +96,19 @@ class LauncherTests(unittest.TestCase):
         result=core.install(self.project,archive,item,editor_probe=lambda _:[123])
         self.assertEqual(result['mode'],'restart_required')
 
+    def test_reflected_settings_changes_require_restart(self):
+        self.install();info=self.state()
+        schema=info['plugin']/'Content/Python/vfx_mesh/settings_types.py'
+        schema.parent.mkdir(parents=True);schema.write_text('old schema')
+        archive,item=self.package('1.2.0')
+        with zipfile.ZipFile(archive,'a') as z:
+            z.writestr('VFXMeshGenerator/Content/Python/vfx_mesh/settings_types.py','new schema')
+        item.update(sha256=core.digest(archive),size=archive.stat().st_size)
+        with self.assertRaises(ValueError):
+            core.install(self.project,archive,item,editor_probe=lambda _:[123])
+        self.assertEqual(schema.read_text(),'old schema')
+        self.assertEqual(core.project_info(self.project)['version'],'1.1.0')
+
     def test_disabled_dependencies(self):
         core.write_json(self.project,{'Plugins':[{'Name':'PythonScriptPlugin','Enabled':False}]})
         with self.assertRaises(ValueError):self.install()

@@ -263,6 +263,7 @@ def can_hot_update(old,new):
         if name.startswith('Content/Python/') and name.endswith('.py'):
             # The bridge keeps its own tick callback while other modules reload.
             # Bridge changes itself require a restart if it already existed.
+            if name.endswith('/settings_types.py'):return False
             if name.endswith('/launcher_bridge.py') and name in before:return False
             continue
         return False
