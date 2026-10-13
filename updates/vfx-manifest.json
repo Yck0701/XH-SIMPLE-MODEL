@@ -3,18 +3,18 @@
   "product": "VFXMeshGenerator",
   "repository": "Yck0701/XH-SIMPLE-MODEL",
   "engine": "5.8",
-  "minimum_launcher": "1.5.4",
-  "notes": "保存按钮更醒目：左侧绿色保存模型，右侧蓝色保存材质，按钮下方显示保存状态；切换环境页仍可保存材质。左侧新增可折叠教程，涵盖快速开始、模型保存、材质保存、Niagara 和预览操作。模型与材质仍分别弹窗确认，只保存指定资产。保留 1.5.4 的自动兼容性检测和本机编译适配。",
+  "minimum_launcher": "1.5.6",
+  "notes": "请先更新启动器到 1.5.6。修复引擎信息读取失败后路径未保留、错误被误提示为选择引擎的问题；支持路径引号、首尾空格和引擎目录。UE 描述文件支持注释及尾逗号，JSON 错误显示具体文件与行列，日志在弹窗前保存。继续严格校验版本、BuildId、DLL 和安装包；不改写工程与引擎描述文件。",
   "plugin": {
-    "version": "1.5.5",
-    "url": "https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.5/VFXMeshGenerator-1.5.5-UE5.8.zip",
-    "sha256": "f52ff86571627a4f8b6a508543fdbb16e040a547a00ba0a0fc40a5dc4a17c0cb",
-    "size": 485157
+    "version": "1.5.6",
+    "url": "https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.6/VFXMeshGenerator-1.5.6-UE5.8.zip",
+    "sha256": "91ac30135c30547929b85a35e54306145fbf462e373312a7f5aae3e1c0846613",
+    "size": 486660
   },
   "launcher": {
-    "version": "1.5.5",
-    "url": "https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.5/VFXMeshLauncher-1.5.5-Windows.zip",
-    "sha256": "145a51430b462c35c87c84b6e4a0914e8be1bc8ed7ce3be8e3b774685c17cd14",
-    "size": 14151144
+    "version": "1.5.6",
+    "url": "https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.6/VFXMeshLauncher-1.5.6-Windows.zip",
+    "sha256": "8e1761de106797f2021a30644e0b89c08eca0734f3368d9c40a31752b01ab7c8",
+    "size": 14156267
   }
 }
