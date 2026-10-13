@@ -34,7 +34,10 @@ def native():
                           ('VFX_Camera',[ctypes.c_wchar_p,ctypes.POINTER(ctypes.c_double)])]:
         fn=getattr(dll,name);fn.argtypes=signature;fn.restype=ctypes.c_int
     dll.VFX_Wireframe.argtypes=[ctypes.c_wchar_p,ctypes.c_int];dll.VFX_Wireframe.restype=ctypes.c_int
+    dll.VFX_WireOpacity.argtypes=[ctypes.c_wchar_p,ctypes.c_double];dll.VFX_WireOpacity.restype=ctypes.c_int
     dll.VFX_GlobalParameter.argtypes=[ctypes.c_wchar_p,ctypes.c_int,ctypes.c_wchar_p];dll.VFX_GlobalParameter.restype=ctypes.c_int
+    for name,args in [('VFX_MaterialDetails',[ctypes.c_wchar_p]*2),('VFX_MaterialRefresh',[ctypes.c_wchar_p,ctypes.c_int]),('VFX_MaterialRevision',[ctypes.c_wchar_p])]:
+        fn=getattr(dll,name);fn.argtypes=args;fn.restype=ctypes.c_int
     _dll=dll;return dll
 
 
@@ -42,6 +45,7 @@ class Preview:
     def __init__(self,panel,parent):
         self.panel=panel;self.dirty=True;self.frame_next=True;self.attached=False
         self.axes=True;self.grid=True;self.floor=True;self.environment=True;self.turntable=False;self.wireframe=False
+        self.wire_opacity=35;self.last_opacity=None
         self.settings=geometry.defaults();self.material=None;self.dynamic=None;self.last_flags=None
         self.host=panel.obj(unreal.NativeWidgetHost)
         slot=panel.add(parent,self.host,0);slot.set_size(unreal.SlateChildSize(size_rule=unreal.SlateSizeRule.FILL))
@@ -72,6 +76,8 @@ class Preview:
         flags=tuple(map(int,(self.axes,self.grid,self.floor,self.environment,self.turntable,self.wireframe)))
         if flags!=self.last_flags:
             self.dll.VFX_Options(self.path,*flags[:5]);self.dll.VFX_Wireframe(self.path,flags[5]);self.last_flags=flags
+        if self.wire_opacity!=self.last_opacity:
+            self.dll.VFX_WireOpacity(self.path,self.wire_opacity/100.);self.last_opacity=self.wire_opacity
 
     def camera(self):
         result=(ctypes.c_double*6)()

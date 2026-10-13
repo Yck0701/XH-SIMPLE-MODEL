@@ -39,7 +39,7 @@ lines+=['/std:c++20','/GR-','/LD','/W0','/FI"'+str(configured/'Definitions.h')+'
     '"'+str(plugin/'Source/NativePreview/Preview.cpp')+'"','/Fo"'+str(out/'Preview.obj')+'"',
     '/Fe"'+str(out/'VFXNativePreview.dll')+'"','/link','/INCREMENTAL:NO']
 modules=('Core','CoreUObject','Engine','Slate','SlateCore','UMG','UnrealEd','AdvancedPreviewScene','GeometryFramework','GeometryCore',
-         'DynamicMesh','RenderCore','RHI','InputCore','ApplicationCore','Projects','ToolMenus','TraceLog','EditorFramework')
+         'DynamicMesh','RenderCore','RHI','InputCore','ApplicationCore','Projects','ToolMenus','TraceLog','EditorFramework','MaterialEditor','PropertyEditor')
 for mod in modules:
     lib=sdk/f'Intermediate/Build/Win64/x64/UnrealEditor/Development/{mod}/UnrealEditor-{mod}.lib'
     if not lib.is_file():
@@ -54,6 +54,6 @@ build_id=json.loads((engine/'Binaries/Win64/UnrealEditor.modules').read_text())[
 dest=plugin/'Native/Win64'/build_id;dest.mkdir(parents=True,exist_ok=True)
 shutil.copy2(out/'VFXNativePreview.dll',dest/'VFXNativePreview.dll')
 hashes={f'Binaries/Win64/UnrealEditor-{mod}.dll':hashlib.sha256((engine/f'Binaries/Win64/UnrealEditor-{mod}.dll').read_bytes()).hexdigest()
-        for mod in ('Core','CoreUObject','Engine','Slate','SlateCore','UMG','UnrealEd','AdvancedPreviewScene','GeometryFramework')}
+        for mod in ('Core','CoreUObject','Engine','Slate','SlateCore','UMG','UnrealEd','AdvancedPreviewScene','GeometryFramework','MaterialEditor','PropertyEditor')}
 (dest/'manifest.json').write_text(json.dumps({'build_id':build_id,'engine_sha256':hashes,'dll_sha256':hashlib.sha256((dest/'VFXNativePreview.dll').read_bytes()).hexdigest()},indent=2))
 print('Built '+str(dest))

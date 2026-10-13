@@ -12,12 +12,14 @@
 #include "MaterialDomain.h"
 #include "CanvasItem.h"
 #include "CanvasTypes.h"
+#include "BatchedElements.h"
 #include "SceneView.h"
 #include "SceneManagement.h"
 #include "Widgets/SNullWidget.h"
 #include "InputCoreTypes.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/SWindow.h"
+#include "MaterialDetails.h"
 
 class FVFXViewportClient : public FEditorViewportClient
 {
@@ -27,6 +29,8 @@ public:
     bool bAxes=true;
     bool bTurntable=false;
     bool bWireframe=false;
+    float WireOpacity=.35f;
+    int WireDraws=0,WireSegments=0;
     TArray<TPair<FVector,FVector>> Edges;
     FVFXViewportClient(TSharedPtr<FAdvancedPreviewScene> InScene,TSharedRef<SEditorViewport> Widget)
         :FEditorViewportClient(nullptr,InScene.Get(),Widget),Scene(InScene)
@@ -67,11 +71,6 @@ public:
     virtual void Draw(const FSceneView* View,FPrimitiveDrawInterface* PDI) override
     {
         FEditorViewportClient::Draw(View,PDI);
-        if(bWireframe)
-        {
-            for(const auto& Edge:Edges)
-                PDI->DrawLine(Edge.Key,Edge.Value,FLinearColor(.05f,.8f,1.f),SDPG_World,.8f,1.f,true);
-        }
         if(bAxes)
         {
             const float Length=FMath::Max(20.f,float(MeshBox.GetExtent().GetMax())*.7f);
@@ -82,6 +81,39 @@ public:
     virtual void DrawCanvas(FViewport& Viewport,FSceneView& View,FCanvas& Canvas) override
     {
         FEditorViewportClient::DrawCanvas(Viewport,View,Canvas);
+        WireSegments=0;
+        if(bWireframe && WireOpacity>0.f)
+        {
+            ++WireDraws;
+            // Draw topology after the scene, using an unjittered projection.
+            // It cannot fight scene depth or accumulate TAA/MSAA edge artifacts.
+            const FMatrix Projection=View.ViewMatrices.GetViewMatrix()*View.ViewMatrices.ComputeProjectionNoAAMatrix();
+            for(const auto& Edge:Edges)
+            {
+                FVector4 A=Projection.TransformFVector4(FVector4(Edge.Key,1));
+                FVector4 B=Projection.TransformFVector4(FVector4(Edge.Value,1));
+                double Start=0,End=1;
+                auto Clip=[&](double DA,double DB)
+                {
+                    if(DA<0 && DB<0)return false;
+                    if(DA<0)Start=FMath::Max(Start,DA/(DA-DB));
+                    if(DB<0)End=FMath::Min(End,DA/(DA-DB));
+                    return Start<=End;
+                };
+                if(!Clip(A.W+A.X,B.W+B.X)||!Clip(A.W-A.X,B.W-B.X)||
+                   !Clip(A.W+A.Y,B.W+B.Y)||!Clip(A.W-A.Y,B.W-B.Y)||
+                   !Clip(A.Z,B.Z)||!Clip(A.W-A.Z,B.W-B.Z))continue;
+                const FVector4 Delta=B-A;B=A+Delta*End;A+=Delta*Start;
+                FVector2D P,Q;
+                if(!View.ScreenToPixel(A,P)||!View.ScreenToPixel(B,Q))continue;
+                // FCanvasLineItem/AddLine force alpha to 1; use the engine's
+                // translucent batch so opacity blends with the material below.
+                Canvas.GetBatchedElements(FCanvas::ET_Line)->AddTranslucentLine(
+                    FVector(P.X,P.Y,0),FVector(Q.X,Q.Y,0),FLinearColor(.05f,.8f,1.f,WireOpacity),
+                    Canvas.GetHitProxyId(),1.2f,0.f,false);
+                ++WireSegments;
+            }
+        }
         if(!bAxes)return;
         const float Length=FMath::Max(20.f,float(MeshBox.GetExtent().GetMax())*.7f);
         const FVector Points[]={FVector::ZeroVector,FVector(Length,0,0),FVector(0,Length,0),FVector(0,0,Length)};
@@ -166,7 +198,7 @@ extern "C" __declspec(dllexport) int VFX_Attach(const wchar_t* HostPath)
         if(auto Window=FSlateApplication::Get().FindWidgetWindow(Cached.ToSharedRef()))
         {
             const FVector2D Size=Window->GetSizeInScreen();
-            if(Size.X<1020 || Size.Y<650)Window->Resize(FVector2D(1200,800));
+            if(Size.X<1320 || Size.Y<760)Window->Resize(FVector2D(1600,900));
         }
     }
     return 1;
@@ -198,10 +230,24 @@ extern "C" __declspec(dllexport) int VFX_Wireframe(const wchar_t* HostPath,int E
     auto* Weak=Viewports.Find(HostPath);auto View=Weak?Weak->Pin():nullptr;if(!View)return 0;
     View->VFXClient->bWireframe=Enabled!=0;View->Invalidate();return 1;
 }
+extern "C" __declspec(dllexport) int VFX_WireOpacity(const wchar_t* HostPath,double Opacity)
+{
+    if(!IsInGameThread() || !FMath::IsFinite(Opacity))return 0;
+    auto* Weak=Viewports.Find(HostPath);auto View=Weak?Weak->Pin():nullptr;if(!View)return 0;
+    View->VFXClient->WireOpacity=float(FMath::Clamp(Opacity,0.,1.));View->Invalidate();return 1;
+}
 extern "C" __declspec(dllexport) int VFX_Camera(const wchar_t* HostPath,double* Values)
 {
     if(!IsInGameThread())return 0;
     auto* Weak=Viewports.Find(HostPath);auto View=Weak?Weak->Pin():nullptr;if(!View)return 0;
     const auto P=View->VFXClient->GetViewLocation();const auto R=View->VFXClient->GetViewRotation();
     Values[0]=P.X;Values[1]=P.Y;Values[2]=P.Z;Values[3]=R.Pitch;Values[4]=R.Yaw;Values[5]=R.Roll;return 1;
+}
+extern "C" __declspec(dllexport) int VFX_WireInfo(const wchar_t* HostPath,double* Values)
+{
+    if(!IsInGameThread())return 0;
+    auto* Weak=Viewports.Find(HostPath);auto View=Weak?Weak->Pin():nullptr;if(!View)return 0;
+    Values[0]=View->VFXClient->Edges.Num();Values[1]=View->VFXClient->bWireframe;Values[2]=View->VFXClient->WireDraws;
+    Values[3]=View->VFXClient->WireSegments;
+    return 1;
 }

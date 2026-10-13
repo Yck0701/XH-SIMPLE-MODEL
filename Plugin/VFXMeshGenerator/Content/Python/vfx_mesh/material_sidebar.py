@@ -1,132 +1,53 @@
-"""Project material instance parameters, edited in memory and explicitly saved."""
-import time
+"""Native UE material parameter details with explicit single-instance saves."""
 import unreal
 from . import engine,preview
-
-
-@unreal.uclass()
-class VFXScalarValue(unreal.Object):
-    value=unreal.uproperty(float,meta={'Category':'参数','DisplayName':'数值'})
-
-@unreal.uclass()
-class VFXVectorValue(unreal.Object):
-    value=unreal.uproperty(unreal.LinearColor,meta={'Category':'参数','DisplayName':'颜色'})
-
-@unreal.uclass()
-class VFXTextureValue(unreal.Object):
-    value=unreal.uproperty(unreal.Texture,meta={'Category':'参数','DisplayName':'贴图'})
-
-@unreal.uclass()
-class VFXSwitchValue(unreal.Object):
-    value=unreal.uproperty(bool,meta={'Category':'参数','DisplayName':'开关'})
-
-
-KINDS=(('scalar','数值',VFXScalarValue),('vector','颜色 / 向量',VFXVectorValue),
-       ('texture','贴图',VFXTextureValue),('static_switch','静态开关',VFXSwitchValue))
 LIB=unreal.MaterialEditingLibrary
 
 
 class Sidebar:
     def __init__(self,panel,parent):
-        self.panel=panel;self.material=None;self.path=None;self.pending={};self.deadline=0.
-        self.bindings={};self.generated=[];self.loading=False
+        self.panel=panel;self.material=None;self.path=None;self.attached=False
+        self.show_hidden=False;self.revision=0
         actions=panel.obj(unreal.HorizontalBox);panel.add(parent,actions)
         panel.button(actions,'刷新参数',lambda:self.refresh(True))
         panel.button(actions,'保存当前材质…',self.save)
-        self.info=panel.text(parent,'选择材质实例即可在这里调整参数。',9,(.65,.7,.75,1))
-        limit=panel.obj(unreal.SizeBox);limit.set_max_desired_height(300);panel.add(parent,limit)
-        self.scroll=panel.obj(unreal.ScrollBox);limit.add_child(self.scroll)
-        self.rows=panel.obj(unreal.VerticalBox);self.scroll.add_child(self.rows)
+        self.hidden=panel.obj(unreal.CheckBox);panel.text(self.hidden,'显示未激活参数')
+        self.hidden.on_check_state_changed.add_callable(self.hidden_changed);panel.add(parent,self.hidden)
+        self.info=panel.text(parent,'选择材质实例，在右侧原生细节栏调整。',9,(.65,.7,.75,1))
+        self.create_button=panel.button(parent,'创建材质实例…',self.create_instance)
+        self.host=panel.obj(unreal.NativeWidgetHost);panel.fill(panel.add(parent,self.host,0))
+        self.host_path=self.host.get_path_name()
         self.refresh()
 
-    def get(self,kind,name):
-        return getattr(LIB,'get_material_instance_'+kind+'_parameter_value')(self.material,name)
+    def hidden_changed(self,value):
+        self.show_hidden=value
+        if self.attached:preview.native().VFX_MaterialRefresh(self.host_path,int(value))
 
     def refresh(self,force=False):
-        self.flush()
         material=self.panel.current_material();path=material.get_path_name() if material else ''
-        if path==self.path and not force:return
-        self.material=material;self.path=path;self.loading=True
-        self.rows.clear_children();self.bindings.clear()
-        stale=set(self.generated);self.panel.refs[:]=[o for o in self.panel.refs if o not in stale];self.generated=[]
-        start=len(self.panel.refs)
-        try:
-            p=self.panel
-            if not material:
-                self.info.set_text('选择材质实例即可在这里调整参数。');return
-            if not isinstance(material,unreal.MaterialInstanceConstant) or not path.startswith('/Game/'):
-                self.info.set_text('请创建当前工程的材质实例，即可在侧栏实时调参并单独保存。')
-                p.button(self.rows,'创建材质实例…',self.create_instance)
-                return
-            count=0;skipped=0
-            for kind,title,cls in KINDS:
-                names=getattr(LIB,'get_'+kind+'_parameter_names')(material)
-                if not names:continue
-                p.heading(self.rows,title)
-                for name in sorted(set(names),key=str):
-                    if not preview.native().VFX_GlobalParameter(path,KINDS.index((kind,title,cls)),str(name)):
-                        skipped+=1;continue
-                    key=(kind,str(name));obj=cls();obj.set_editor_property('value',self.get(kind,name))
-                    row=p.obj(unreal.HorizontalBox);p.add(self.rows,row)
-                    override=p.obj(unreal.CheckBox)
-                    enabled=LIB.is_material_instance_parameter_overridden(material,name)
-                    override.set_is_checked(enabled);override.set_tool_tip_text('勾选以覆盖父材质参数；取消恢复继承值')
-                    p.add(row,override)
-                    view=p.obj(unreal.SinglePropertyView);view.set_property_name('value');view.set_name_override(str(name));view.set_object(obj)
-                    view.set_is_enabled(enabled);view.set_tool_tip_text(str(name));p.fill(p.add(row,view))
-                    self.bindings[key]=(obj,view,override)
-                    view.on_property_changed.add_callable(self.value_handler(key))
-                    override.on_check_state_changed.add_callable(self.override_handler(key))
-                    count+=1
-            message='勾选左侧覆盖后编辑；更改会影响所有引用此实例的对象。' if count else '此实例没有可编辑的常用参数，请在原生材质编辑器中检查。'
-            if skipped:message+=' 分层或重名参数请用“编辑当前材质”调整。'
-            self.info.set_text(message)
-        finally:
-            self.generated=self.panel.refs[start:];self.loading=False
-
-    def value_handler(self,key):
-        def changed(_):self.panel.safe(lambda:self.change(key))
-        return changed
-
-    def override_handler(self,key):
-        def changed(value):self.panel.safe(lambda:self.override(key,value))
-        return changed
-
-    def change(self,key):
-        if self.loading:return
-        obj,_,_=self.bindings[key]
-        self.pending[key]=obj.get_editor_property('value')
-        if not self.deadline:self.deadline=time.monotonic()+.15
-        self.panel.status.set_text('材质参数待更新，尚未保存。')
+        changed=path!=self.path;self.material=material;self.path=path
+        editable=isinstance(material,unreal.MaterialInstanceConstant) and path.startswith('/Game/')
+        self.create_button.set_visibility(unreal.SlateVisibility.COLLAPSED if editable or not material else unreal.SlateVisibility.VISIBLE)
+        self.hidden.set_is_enabled(editable)
+        self.info.set_text('参数分组与控件沿用 UE 材质细节栏。更改会影响所有引用此实例的对象；保存需单独确认。' if editable else '请创建当前工程的材质实例后调整参数。' if material else '选择材质实例，在右侧原生细节栏调整。')
+        if changed:self.attached=False
+        if self.attached and force:preview.native().VFX_MaterialRefresh(self.host_path,int(self.show_hidden))
 
     def flush(self):
-        if not self.pending:return
-        material=self.material
-        if not isinstance(material,unreal.MaterialInstanceConstant):raise ValueError('请先选择材质实例。')
-        values=dict(self.pending)
-        with unreal.ScopedEditorTransaction('特效网格：调整材质实例参数'):
-            material.modify()
-            for (kind,name),value in values.items():
-                # Some engine builds report False even after a successful setter.
-                getattr(LIB,'set_material_instance_'+kind+'_parameter_value')(material,name,value)
-        self.pending.clear();self.deadline=0.
-        self.panel.status.set_text('材质参数已实时更新，尚未保存。')
-
-    def override(self,key,enabled):
-        if self.loading:return
-        self.flush()
-        with unreal.ScopedEditorTransaction('特效网格：材质参数覆盖'):
-            self.material.modify()
-            if not LIB.set_material_instance_parameter_override(self.material,key[1],enabled):
-                raise ValueError('该参数无法在侧栏覆盖，请在原生材质编辑器中调整。')
-        obj,view,_=self.bindings[key]
-        self.loading=True
-        try:obj.set_editor_property('value',self.get(*key));view.set_is_enabled(enabled)
-        finally:self.loading=False
-        self.panel.status.set_text('材质参数已更新，尚未保存。')
+        # UE property handles apply directly to the in-memory instance.
+        pass
 
     def tick(self):
-        if self.deadline and time.monotonic()>=self.deadline:self.flush()
+        dll=preview.native()
+        if not self.attached:
+            editable=isinstance(self.material,unreal.MaterialInstanceConstant) and self.path.startswith('/Game/')
+            if not dll.VFX_MaterialDetails(self.host_path,self.path if editable else ''):
+                raise RuntimeError('无法创建 UE 原生材质细节栏。')
+            self.attached=True;self.revision=dll.VFX_MaterialRevision(self.host_path)
+            if self.show_hidden:dll.VFX_MaterialRefresh(self.host_path,1)
+        revision=dll.VFX_MaterialRevision(self.host_path)
+        if revision!=self.revision:
+            self.revision=revision;self.panel.status.set_text('材质参数已实时更新，尚未保存。')
 
     def save(self):
         material=self.material

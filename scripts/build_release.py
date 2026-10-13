@@ -49,7 +49,7 @@ def main():
     zip_tree(bundle,launcher,'VFXMeshLauncher')
     base=f'https://github.com/{REPOSITORY}/releases/download/vfx-v{VERSION}/'
     feed={'schema':1,'product':'VFXMeshGenerator','repository':REPOSITORY,'engine':'5.8','minimum_launcher':'1.2.0',
-        'notes':'新增模型线框叠加、材质实例侧栏实时调参、继承与覆盖、单独确认保存材质及创建实例。模型和材质分别保存。本次包含原生组件更新，请保存并关闭工程后安装。'}
+        'notes':'右侧使用 UE 原生材质细节控件，支持分组、搜索、RGBA 展开与参数覆盖；左侧模型、中间预览、右侧材质。修复线框贴面深度冲突导致的闪烁；增加 0–100% 线框不透明度，默认 35%。模型和材质分别确认保存。本次包含原生组件更新，请保存并关闭工程后安装。'}
     for key,file in [('plugin',plugin),('launcher',launcher)]:
         feed[key]={'version':VERSION,'url':base+file.name,'sha256':core.digest(file),'size':file.stat().st_size}
     core.validate_feed(feed);core.write_json(release/'vfx-manifest.json',feed)

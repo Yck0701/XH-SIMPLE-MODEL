@@ -22,13 +22,13 @@ class VFXUserMaterialSettings(unreal.Object):
 class Panel:
     def __init__(self,widget):
         self.widget=widget;self.mesh=None;self.settings=geometry.defaults()
-        self.surface={'mode':'custom','material':''};self.live=True;self.loading=False
+        self.surface={'mode':'custom','material':''};self.live=True;self.loading=True
         self.pending=None;self.geometry_dirty=False;self.surface_dirty=False
         self.history=[];self.last_applied=None;self.unsaved=False
         self.controls={};self.rows={};self.refs=[]
         self.root=widget.find_child_widget_by_name('VerticalBox_0')
         if not self.root:raise RuntimeError('插件面板模板缺失。')
-        self.root.clear_children();self.build_ui();self.last_tick=time.monotonic();self.last_applied=self.snapshot()
+        self.root.clear_children();self.build_ui();self.loading=False;self.last_tick=time.monotonic();self.last_applied=self.snapshot()
 
     def obj(self,cls):
         cls=getattr(unreal,'EditorUtility'+cls.__name__,cls)
@@ -97,7 +97,7 @@ class Panel:
     def build_ui(self):
         border=self.obj(unreal.Border);border.set_padding(unreal.Margin(8,8,8,8));border.set_brush_color(unreal.LinearColor(.018,.023,.029,1))
         self.fill(self.add(self.root,border,0))
-        minimum=self.obj(unreal.SizeBox);minimum.set_min_desired_width(1020);minimum.set_min_desired_height(650);border.add_child(minimum)
+        minimum=self.obj(unreal.SizeBox);minimum.set_min_desired_width(1320);minimum.set_min_desired_height(760);border.add_child(minimum)
         body=self.obj(unreal.VerticalBox);minimum.add_child(body)
         top=self.obj(unreal.HorizontalBox);self.add(body,top)
         self.text(top,'特效网格工作台',14)
@@ -107,7 +107,7 @@ class Panel:
         self.button(top,'定位模型',self.locate)
         self.asset_label=self.text(body,'预览草稿 · 尚未创建资产',10,(.65,.7,.75,1))
         columns=self.obj(unreal.HorizontalBox);self.fill(self.add(body,columns))
-        left_box=self.obj(unreal.SizeBox);left_box.set_width_override(350);self.add(columns,left_box,3)
+        left_box=self.obj(unreal.SizeBox);left_box.set_width_override(300);self.add(columns,left_box,3)
         scroll=self.obj(unreal.ScrollBox);left_box.add_child(scroll);self.scroll=scroll
         left=self.obj(unreal.VerticalBox);scroll.add_child(left)
         self.heading(left,'形状与尺寸 · cm')
@@ -125,14 +125,6 @@ class Panel:
             for axis in 'xyz':
                 box=self.obj(unreal.VerticalBox);self.fill(self.add(row,box,0))
                 self.spin(box,prefix+axis,axis.upper(),0.,-limit,limit,width=16)
-        self.heading(left,'使用自己的材质')
-        self.pickers=VFXUserMaterialSettings();details=self.obj(unreal.DetailsView)
-        details.set_editor_property('force_hidden_property_visibility',True);details.set_editor_property('allow_filtering',False)
-        details.set_object(self.pickers);details.on_property_changed.add_callable(self.picker_changed);self.add(left,details)
-        actions=self.obj(unreal.HorizontalBox);self.add(left,actions)
-        self.button(actions,'使用所选材质',self.use_selected_material)
-        self.button(actions,'编辑当前材质',self.edit_material,'打开该材质或材质实例的 UE 原生编辑器')
-        self.material_sidebar=material_sidebar.Sidebar(self,left)
         self.heading(left,'更新与撤回')
         actions=self.obj(unreal.HorizontalBox);self.add(left,actions)
         self.check(actions,'live','实时更新',True,'options')
@@ -151,9 +143,30 @@ class Panel:
         self.text(actions,'左键旋转 · 中键平移 · 滚轮 / 右键缩放 · F 聚焦',9,(.65,.7,.75,1))
         self.viewer=preview.Preview(self,right)
         options=self.obj(unreal.HorizontalBox);self.add(right,options)
-        for key,label,value in [('wireframe','模型线框',False),('axes','坐标轴 / 原点',True),('grid','网格',True),('floor','地板',True),('environment','环境',True),('turntable','自动旋转',False)]:self.check(options,key,label,value,'preview')
+        self.check(options,'wireframe','模型线框',False,'preview')
+        opacity=self.spin(options,'wire_opacity','不透明度 %',self.viewer.wire_opacity,0,100,'preview',80)
+        opacity_tip='拖动或输入 0–100：0 完全隐藏，100 完全不透明。默认 35，仅影响预览线框。'
+        opacity.set_tool_tip_text(opacity_tip)
+        slider_box=self.obj(unreal.SizeBox);slider_box.set_width_override(110);self.add(options,slider_box,4)
+        self.opacity_slider=self.obj(unreal.Slider);slider_box.add_child(self.opacity_slider)
+        self.opacity_slider.set_min_value(0.);self.opacity_slider.set_max_value(100.);self.opacity_slider.set_step_size(1.)
+        self.opacity_slider.set_value(float(self.viewer.wire_opacity));self.opacity_slider.set_tool_tip_text(opacity_tip)
+        self.opacity_slider.on_value_changed.add_callable(lambda value:self.change('preview','wire_opacity',int(round(value))))
+        self.controls[('preview','wireframe')].set_tool_tip_text('透视显示基础网格的全部三角布线（含背面），避免与材质表面发生深度冲突。仅用于预览。')
+        options=self.obj(unreal.HorizontalBox);self.add(right,options)
+        for key,label,value in [('axes','坐标轴 / 原点',True),('grid','网格',True),('floor','地板',True),('environment','环境',True),('turntable','自动旋转',False)]:self.check(options,key,label,value,'preview')
         self.preview_stats=self.text(right,'预览正在准备…',10,(.65,.7,.75,1))
         self.text(right,'预览场景独立于当前关卡。保存后的模型可指定给 Niagara Mesh Renderer。',9,(.65,.7,.75,1))
+        material_box=self.obj(unreal.SizeBox);material_box.set_width_override(420);self.add(columns,material_box,4)
+        material_column=self.obj(unreal.VerticalBox);material_box.add_child(material_column)
+        self.heading(material_column,'材质细节')
+        self.pickers=VFXUserMaterialSettings();details=self.obj(unreal.DetailsView)
+        details.set_editor_property('force_hidden_property_visibility',True);details.set_editor_property('allow_filtering',False)
+        details.set_object(self.pickers);details.on_property_changed.add_callable(self.picker_changed);self.add(material_column,details)
+        actions=self.obj(unreal.HorizontalBox);self.add(material_column,actions)
+        self.button(actions,'使用所选材质',self.use_selected_material)
+        self.button(actions,'编辑当前材质',self.edit_material,'打开该材质或材质实例的 UE 原生编辑器')
+        self.material_sidebar=material_sidebar.Sidebar(self,material_column)
         self.status=self.text(body,'拖动参数即可预览；确认保存后才会新建模型资产。',10,(.65,.85,.7,1))
         self.visibility()
 
@@ -163,7 +176,14 @@ class Panel:
 
     def change(self,target,key,value):
         if self.loading:return
-        if target=='preview':setattr(self.viewer,key,value);return
+        if target=='preview':
+            setattr(self.viewer,key,value)
+            if key=='wire_opacity':
+                self.loading=True
+                try:
+                    self.controls[('preview',key)].set_value(float(value));self.opacity_slider.set_value(float(value))
+                finally:self.loading=False
+            return
         if target=='options':
             self.live=value
             if value:self.queue()
@@ -212,6 +232,7 @@ class Panel:
                 if isinstance(control,unreal.SpinBox):control.set_value(float(value))
                 elif isinstance(control,unreal.CheckBox):control.set_is_checked(value)
                 else:control.set_selected_option(labels[key][value])
+            self.opacity_slider.set_value(float(self.viewer.wire_opacity))
             self.pickers.set_editor_property('material',self.current_material());self.visibility()
         finally:self.loading=False
         self.material_sidebar.refresh()
@@ -299,10 +320,13 @@ class Panel:
 
 def _restore(panel,old):
     if hasattr(old,'material_sidebar'):old.material_sidebar.flush()
+    if hasattr(old,'material_sidebar'):
+        panel.material_sidebar.show_hidden=old.material_sidebar.show_hidden
+        panel.material_sidebar.hidden.set_is_checked(old.material_sidebar.show_hidden)
     for key in ('mesh','settings','surface','live','history','last_applied','geometry_dirty','surface_dirty','pending','unsaved'):
         if hasattr(old,key):setattr(panel,key,getattr(old,key))
     if hasattr(old,'viewer'):
-        for key in ('axes','grid','floor','environment','turntable','wireframe'):
+        for key in ('axes','grid','floor','environment','turntable','wireframe','wire_opacity'):
             if hasattr(old.viewer,key):setattr(panel.viewer,key,getattr(old.viewer,key))
     if panel.mesh:
         material=panel.mesh.get_material(0)

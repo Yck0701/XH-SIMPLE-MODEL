@@ -7,7 +7,7 @@ import unreal
 from vfx_mesh import runtime,engine
 
 root=Path(unreal.Paths.project_dir()).resolve()
-assert root.name in ('vfx120','vfx120-stock','vfx120-native','vfx130-stock','vfx130-native'), 'This test must not run in a user project'
+assert root.name in ('vfx120','vfx120-stock','vfx120-native','vfx130-stock','vfx130-native','vfx140-stock','vfx140-native'), 'This test must not run in a user project'
 def files():
     return {p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
             for base in ('Content','Config') for p in (root/base).rglob('*') if p.is_file()}

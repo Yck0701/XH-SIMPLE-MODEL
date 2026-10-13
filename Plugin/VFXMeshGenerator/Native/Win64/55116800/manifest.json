@@ -9,7 +9,9 @@
     "Binaries/Win64/UnrealEditor-UMG.dll": "1f31f106e74e693db64742d222d0af43ecea0e711501640204e4defa0efdf789",
     "Binaries/Win64/UnrealEditor-UnrealEd.dll": "528a40a0d46379f30ae42b0416a4e65d3944f6815d44cc67964a42206a89c07f",
     "Binaries/Win64/UnrealEditor-AdvancedPreviewScene.dll": "4bc1f799b96c96ad8a44e520aeadebe7cb6434d8aaeb8997df9dc59fa5aa74ba",
-    "Binaries/Win64/UnrealEditor-GeometryFramework.dll": "4cecc589d599cdf80ba488e1546e79648e17021692e5caeb67d9fb72bc46d2e5"
+    "Binaries/Win64/UnrealEditor-GeometryFramework.dll": "4cecc589d599cdf80ba488e1546e79648e17021692e5caeb67d9fb72bc46d2e5",
+    "Binaries/Win64/UnrealEditor-MaterialEditor.dll": "10adebd353201e40b1a5601232662973797db96509abe241c575b6bc678f6e3f",
+    "Binaries/Win64/UnrealEditor-PropertyEditor.dll": "a5b8630ae4f878adb9efa6a079abe8dc8e4f32da33d78e71dec657b1028e1338"
   },
-  "dll_sha256": "3fe629d7b32b92e433fa5b57c8b29ad1d4b9f120b664458959a9dcac65c9abfb"
+  "dll_sha256": "2f6405e7498f770444c1b0440f847806535be80ad94f3dd404520bb73487e2fd"
 }
