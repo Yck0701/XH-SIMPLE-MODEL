@@ -4,6 +4,8 @@
 
 **[下载 Windows 启动器](https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/latest)** · **[5 步使用教学](docs/使用教学.md)**
 
+当前正式版：**1.5.4（2026-10-13）**。[直接下载启动器 ZIP](https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.4/VFXMeshLauncher-1.5.4-Windows.zip) · [版本说明与校验文件](https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/tag/vfx-v1.5.4)。完整解压并保留 `compiler`、`offline`、`_internal` 文件夹。
+
 ## 三步开始
 
 1. 完整解压 `VFXMeshLauncher-1.5.4-Windows.zip`，双击 `VFX特效网格启动器.exe`。无需安装 Python。
@@ -15,8 +17,9 @@
 - 打开启动器自动检测所选 UE。缺少匹配组件时显示路径、版本、BuildId，并询问是否编译适配；用户确认后才启动编译。
 - 安装工具包含原生源码、构建模板和验证脚本。使用所选 UE 的 SDK 与它选择的 MSVC / Windows SDK，生成本机专用组件。
 - 编译成功后必须通过独立空工程的预览、材质、三轮关闭重开及三轮重载验证。通过后点击安装并再次确认目标工程。
-- 相同 BuildId 的不同 UE 构建分开保存，仍校验具体版本和全部依赖 DLL。更换插件包或引擎后需要重新适配。
-- 本机官方 UE 5.8.3 进行实机验证；UE 5.8.2 必须在对应电脑运行编译验证。已为更新后的公司引擎增加经过验证的组件；构建规则缓存缺失时，会在独立缓存重建规则副本，不替换引擎原文件。
+- 相同 BuildId 的不同 UE 构建分开保存，仍校验具体版本和依赖 DLL。更换插件包或引擎后重新检测，缺少匹配组件时再编译。
+- 官方 UE 5.8.3 与更新后的公司 UE 5.8.3 已通过真实编译和独立编辑器验证；UE 5.8.2 必须在对应电脑完成编译验证。构建规则缓存缺失时，会在独立缓存重建规则副本，不替换引擎原文件。
+- 43 项测试、三组最终包隔离安装、启动器自检和公开下载 SHA-256 校验通过。验证范围见 [验证记录](docs/验证记录.md)。
 
 详见 [本机编译与兼容性处理](docs/本机编译适配.md)。
 
@@ -52,7 +55,15 @@
 
 ## 适用环境
 
-Windows x64、UE **5.8.3**。原生组件按引擎 BuildId 和二进制指纹匹配，发行包包含官方构建 `55116800` 和定制构建 `93941773-5036-42be-9ee8-469d175d5470`。其他构建即使版本号相同，也需要重新编译适配组件；启动器会在安装前检查。
+Windows x64，启动器接受 **UE 5.8** 并在安装前检查具体构建。1.5.4 内置以下三套 UE **5.8.3** 组件：
+
+| 引擎构建 | BuildId | 验证状态 |
+| --- | --- | --- |
+| 官方 UE 5.8.3，CL 58210709 | `55116800` | 真实编译与独立编辑器验证通过 |
+| 公司先前构建 | `93941773-5036-42be-9ee8-469d175d5470` | 保留此前通过验证的组件 |
+| 公司当前构建 | `210891e3-aa60-4f7b-ac84-35d0b26d09fc` | 真实编译与独立编辑器验证通过 |
+
+版本号或 BuildId 相同不代表兼容，仍需 DLL 指纹匹配；盘符不参与匹配。其他 UE 5.8 构建可使用启动器的“为当前引擎编译适配”。**UE 5.8.2 尚未实机验证**，需在目标电脑用该引擎完整开发文件完成编译和独立验证。
 
 插件用于编辑器制作，不包含运行时变形。依赖 Python Script Plugin、Editor Scripting Utilities、Geometry Scripting 和 Niagara。半透明特效网格默认关闭 Nanite、不生成碰撞。
 
@@ -63,7 +74,9 @@ Windows x64、UE **5.8.3**。原生组件按引擎 BuildId 和二进制指纹匹
 - `Plugin/VFXMeshGenerator`：Python 工作台、网格生成与小型原生预览适配组件源码。
 - `Launcher`：Windows 启动器。
 - `tests`：安装、更新、回退测试及隔离 UE 工程中的保存验证脚本。
-- `scripts/build_native.py`：为指定引擎生成预览组件。
+- `Launcher/native_builder.py`：启动器本机编译、工具链检测、独立验证和适配缓存。
+- `scripts/RulesHelper`、`scripts/CompilerHost`、`scripts/verify_native.py`：随启动器分发的构建与验证附件。
+- `scripts/build_native.py`：维护者手动构建脚本，具体限制见发布流程。
 - `scripts/build_release.py`：构建 EXE、离线插件和发行清单。
 - [发布流程](docs/发布新版本.md) · [验证记录](docs/验证记录.md)
 
