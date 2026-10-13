@@ -39,7 +39,7 @@ class App(tk.Tk):
     def __init__(self, initial_project='', auto_check=None):
         super().__init__();self.title(PRODUCT+'  '+VERSION);self.geometry('1080x810');self.minsize(980,760)
         self.configure(bg=BG)
-        self.events=queue.Queue();self.busy=False;self.checking=False;self.closing=False;self.feed=None
+        self.events=queue.Queue();self.busy=False;self.checking=False;self.closing=False;self.feed=None;self.last_update_error=''
         config=settings()
         self.project=tk.StringVar(value=initial_project or config.get('project',''))
         self.engine=tk.StringVar(value=config.get('engine',''))
@@ -53,8 +53,8 @@ class App(tk.Tk):
         self.control_widgets=[];self.pages={};self.nav={}
         self.style_ui();self.build_ui();self.refresh_project();self.show('home')
         self.protocol('WM_DELETE_WINDOW',self.close)
-        self.after(80,self.pump)
-        if self.auto_check.get():self.after(500,self.check)
+        self._pump_after=self.after(80,self.pump)
+        self._check_after=self.after(500,self.check) if self.auto_check.get() else None
 
     def style_ui(self):
         s=ttk.Style(self);s.theme_use('clam')
@@ -134,6 +134,7 @@ class App(tk.Tk):
         actions=ttk.Frame(page);actions.pack(fill='x',pady=(4,12))
         self.button(actions,'2  安装 / 更新插件',self.install,accent=True,lock=True).pack(side='left',padx=(0,10))
         self.button(actions,'3  启动 UE / 独立工作台',self.launch,lock=True).pack(side='left')
+        self.button(actions,'检测兼容性',self.check_compatibility,lock=True).pack(side='left',padx=(10,0))
         self.label(page,'首次安装需要重启一次 UE，之后兼容的脚本更新可直接热重载。','Muted.TLabel',padding=(0,6))
         self.label(page,'在 Niagara 中把生成的模型指定给 Mesh Renderer 一次，之后即可实时调参。','Muted.TLabel',wraplength=740)
         self.button(page,'第一次用？查看 5 步教学 →',lambda:self.show('guide')).pack(anchor='w',pady=(15,0))
@@ -148,6 +149,10 @@ class App(tk.Tk):
         self.button(row,'立即检查',self.check).pack(side='left',padx=(0,10))
         self.button(row,'安装 / 更新插件',self.install,accent=True,lock=True).pack(side='left',padx=(0,10))
         self.button(row,'更新启动器并重开',self.update_launcher,lock=True).pack(side='left')
+        row=ttk.Frame(page);row.pack(fill='x',pady=(10,0))
+        self.button(row,'安装内置版本',lambda:self.install(offline_only=True),lock=True).pack(side='left',padx=(0,10))
+        self.button(row,'浏览器下载 ↗',lambda:webbrowser.open(core.WEB+'/releases/latest')).pack(side='left',padx=(0,10))
+        self.button(row,'导出诊断报告',self.export_diagnostic,lock=True).pack(side='left')
         self.label(page,'更新说明','Heading.TLabel',padding=(0,24,0,12))
         self.label(page,textvariable=self.notes,wraplength=735,justify='left')
         self.label(page,'更新规则','Heading.TLabel',padding=(0,25,0,12))
@@ -236,42 +241,46 @@ class App(tk.Tk):
                         with (STATE/'launcher.log').open('a',encoding='utf-8') as log:log.write(time.strftime('%Y-%m-%d %H:%M:%S')+'\n'+event[2]+'\n')
                     except OSError:pass
         except queue.Empty:pass
-        if not self.closing:self.after(80,self.pump)
+        if not self.closing:self._pump_after=self.after(80,self.pump)
 
     def check(self):
         if self.checking:return
         self.checking=True;self.update_status.set('正在连接 GitHub…');self.remote.set('检查中')
         def job():
             try:return {'feed':core.check_updates()}
-            except Exception as error:return {'error':str(error)}
+            except Exception as error:return {'error':str(error) if isinstance(error,RuntimeError) else core.network_error(error)}
         def done(result):
             self.checking=False;self.check_time.set('检查时间：'+time.strftime('%m-%d %H:%M'))
             if 'error' in result:
-                self.update_status.set('暂时无法检查更新，当前版本仍可使用。');self.remote.set('暂未获取')
-                self.notes.set('未获取最新版本。可先使用内置安装包，联网后点击“立即检查”。')
+                self.last_update_error=result['error']
+                cached='；保留上次获取的版本 '+self.feed['plugin']['version'] if self.feed else ''
+                self.update_status.set('暂时无法检查更新'+cached+'。');self.remote.set(self.feed['plugin']['version']+'（上次）' if self.feed else '暂未获取')
+                self.notes.set(result['error']+'\n\n可点击“安装内置版本”，或通过“浏览器下载”获取完整启动器 ZIP。')
+                try:core.write_json(STATE/'update-error.json',{'time':time.time(),'version':VERSION,'error':result['error']})
+                except OSError:pass
                 return
-            self.feed=result['feed'];self.remote.set(self.feed['plugin']['version'])
+            self.last_update_error='';self.feed=result['feed'];self.remote.set(self.feed['plugin']['version'])
             installed=self.installed.get()
             new=installed in ('未选择工程','尚未安装','路径无效') or core.version_tuple(self.feed['plugin']['version'])>core.version_tuple(installed)
             self.update_status.set(('可安装新版插件 '+self.feed['plugin']['version']) if new else '当前插件已是最新版本。')
             self.notes.set(self.feed.get('notes','无更新说明。'))
         self.worker(job,done,mutation=False)
 
-    def package_choice(self):
+    def package_choice(self,offline_only=False):
         offline=core.read_json(BASE/'offline/manifest.json')
         candidates=[(core.version_tuple(offline['plugin']['version']),'offline',offline['plugin'])]
-        if self.feed:
+        if self.feed and not offline_only:
             if core.version_tuple(self.feed.get('minimum_launcher','1.1.0'))>core.version_tuple(VERSION):
                 raise ValueError('请先点击“更新启动器并重开”，再安装此插件版本。')
             candidates.append((core.version_tuple(self.feed['plugin']['version']),'online',self.feed['plugin']))
         return max(candidates,key=lambda item:item[0])[1:]
 
-    def install(self):
+    def install(self,offline_only=False):
         try:
             info=core.project_info(self.project.get());engine=self.engine.get()
             if engine:core.validate_engine(engine)
             else:raise ValueError('请选择对应的 UnrealEditor.exe，确认 UE 版本后再安装。')
-            origin,item=self.package_choice();project=str(info['file']);self.save_settings()
+            origin,item=self.package_choice(offline_only);project=str(info['file']);self.save_settings()
         except Exception as error:messagebox.showerror('请先完成设置',str(error),parent=self);return
         self.status.set('正在校验并安装插件，请稍等…');self.progress['value']=0
         def job():
@@ -283,6 +292,55 @@ class App(tk.Tk):
                 'restart_required':'插件已更新。首次启用热更新连接，请保存并重启 UE 一次。',
                 'installed':'安装完成，点击“启动 UE / 独立工作台”开始制作。'}[result['mode']])
         self.worker(job,done)
+
+    def export_diagnostic(self):
+        try:
+            engine=str(core.validate_engine(self.engine.get()))
+            offline=core.read_json(BASE/'offline/manifest.json')['plugin'];archive=BASE/'offline'/offline['file']
+            if core.digest(archive)!=offline['sha256']:raise ValueError('内置安装包校验失败，请重新完整解压启动器。')
+        except Exception as error:messagebox.showerror('诊断未完成',str(error),parent=self);return
+        path=filedialog.asksaveasfilename(title='保存引擎与更新诊断（不含项目资产）',defaultextension='.json',
+            initialfile='VFXMesh-diagnostic.json',filetypes=[('诊断报告','*.json')])
+        if not path:return
+        update_error=self.last_update_error
+        def job():
+            report=core.diagnostic_report(engine,archive);report['update_error']=update_error
+            core.write_json(path,report);return report
+        def done(report):
+            self.status.set('诊断报告已保存：'+path)
+            messagebox.showinfo('诊断报告已保存','引擎校验'+('通过。' if report['engine']['compatible'] else '发现差异。')+'\n'+path+'\n\n报告仅包含版本、文件名、指纹和更新错误；不会自动上传，也不会修改工程。',parent=self)
+        self.status.set('正在读取引擎指纹并生成诊断报告…');self.worker(job,done)
+
+    def check_compatibility(self):
+        try:
+            engine=str(core.validate_engine(self.engine.get()))
+            item=core.read_json(BASE/'offline/manifest.json')['plugin'];archive=BASE/'offline'/item['file']
+            if core.digest(archive)!=item['sha256']:raise ValueError('内置安装包校验失败，请重新完整解压启动器。')
+        except Exception as error:messagebox.showerror('无法检测',str(error),parent=self);return
+        def done(report):
+            result=report['engine'];window=tk.Toplevel(self);window.title('引擎兼容性检测');window.geometry('790x560');window.minsize(650,440)
+            window.transient(self);window.configure(bg=BG)
+            frame=ttk.Frame(window,padding=20);frame.pack(fill='both',expand=True)
+            self.label(frame,'检测通过' if result['compatible'] else '需要处理兼容性差异','Heading.TLabel')
+            content='检测的插件：'+report['plugin_version']+'（启动器内置包）\n引擎：'+engine+'\nBuildId：'+result['build_id']+'\n\n'
+            content+=report['solution']+'\n\n文件检查：\n'
+            for f in result['files']:
+                content+=({'match':'通过','missing':'缺失','different':'内容不同'}[f['status']])+'  '+Path(f['file']).name+'\n'
+                if f['status']!='match':content+='  预期 SHA-256：'+f['expected_sha256']+'\n  当前 SHA-256：'+str(f['actual_sha256'] or '文件不存在')+'\n'
+            actions=ttk.Frame(frame);actions.pack(side='bottom',fill='x')
+            body=ttk.Frame(frame);body.pack(fill='both',expand=True,pady=12)
+            text=tk.Text(body,wrap='word',bg=CARD,fg=TEXT,relief='flat',font=('Microsoft YaHei UI',10),padx=10,pady=10)
+            scroll=ttk.Scrollbar(body,command=text.yview);scroll.pack(side='right',fill='y')
+            text.configure(yscrollcommand=scroll.set);text.pack(fill='both',expand=True);text.insert('1.0',content);text.configure(state='disabled')
+            def save():
+                path=filedialog.asksaveasfilename(parent=window,title='保存兼容性诊断',defaultextension='.json',initialfile='VFXMesh-diagnostic.json',filetypes=[('诊断报告','*.json')])
+                if path:
+                    try:core.write_json(path,dict(report,update_error=self.last_update_error));self.status.set('诊断报告已保存：'+path)
+                    except OSError as error:messagebox.showerror('保存失败',str(error),parent=window)
+            self.button(actions,'导出这份检测报告',save).pack(side='left')
+            self.button(actions,'关闭',window.destroy).pack(side='right')
+            self.status.set('兼容性检测通过。' if result['compatible'] else '已列出不匹配文件和解决方案；工程未修改。')
+        self.status.set('正在只读检测引擎与内置插件的兼容性…');self.worker(lambda:core.diagnostic_report(engine,archive),done)
 
     def launch(self):
         project,engine=self.project.get(),self.engine.get();self.save_settings();self.status.set('正在打开你的工程与网格面板…')
@@ -327,7 +385,12 @@ class App(tk.Tk):
 
     def close(self):
         if self.busy:messagebox.showinfo('请稍等','正在安装或更新，请完成后再关闭启动器。',parent=self);return
-        self.save_settings();self.closing=True;self.destroy()
+        self.save_settings();self.closing=True
+        for handle in (self._pump_after,self._check_after):
+            if handle:
+                try:self.after_cancel(handle)
+                except tk.TclError:pass
+        self.destroy()
 
 
 def main():

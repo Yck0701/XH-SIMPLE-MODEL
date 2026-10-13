@@ -1,11 +1,14 @@
 """Download validation, project installation, backup and fixed editor IPC."""
 from contextlib import contextmanager
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import socket
+import ssl
 import stat
 import subprocess
 import tempfile
@@ -20,6 +23,7 @@ from version import VERSION, REPOSITORY
 PLUGIN = 'VFXMeshGenerator'
 API = 'https://api.github.com/repos/' + REPOSITORY
 WEB = 'https://github.com/' + REPOSITORY
+STATIC_FEED = 'https://raw.githubusercontent.com/' + REPOSITORY + '/main/updates/vfx-manifest.json'
 MAX_DOWNLOAD = 250 * 1024 * 1024
 
 
@@ -61,19 +65,48 @@ def asset_url(url):
     return url
 
 
+def network_error(error):
+    """Actionable message without exposing proxy credentials or signed URLs."""
+    if isinstance(error,urllib.error.HTTPError):
+        if error.code in (403,429):return 'GitHub 请求受限（HTTP '+str(error.code)+'），请稍后重试。'
+        if error.code==404:return '该更新地址暂时没有文件（HTTP 404）。'
+        return '下载服务返回 HTTP '+str(error.code)+'。'
+    reason=getattr(error,'reason',error)
+    if isinstance(reason,ssl.SSLError):return 'HTTPS 证书验证失败，请检查系统时间或联系网络管理员。'
+    if isinstance(reason,(TimeoutError,socket.timeout)):return '连接超时，请检查网络或代理。'
+    if isinstance(reason,socket.gaierror):return '无法解析 GitHub 域名，请检查 DNS 或网络。'
+    if isinstance(error,(OSError,urllib.error.URLError)):return '无法连接 GitHub，请检查网络或代理；也可使用内置离线包。'
+    return '更新信息或下载校验无效，请重试或下载完整启动器包。'
+
+
+def retryable(error):
+    if isinstance(error,urllib.error.HTTPError):return error.code in (408,429,500,502,503,504)
+    if isinstance(getattr(error,'reason',error),ssl.SSLError):return False
+    return isinstance(error,(urllib.error.URLError,TimeoutError,ConnectionError,http.client.IncompleteRead))
+
+
 def fetch_json(url):
-    req=urllib.request.Request(url,headers={'User-Agent':'VFXMeshLauncher/'+VERSION,'Accept':'application/vnd.github+json'})
-    with urllib.request.urlopen(req,timeout=18) as response:
-        data=response.read(1024*1024+1)
-        if len(data)>1024*1024:raise ValueError('更新信息过大。')
-    return json.loads(data)
+    for attempt in range(2):
+        try:
+            req=urllib.request.Request(url,headers={'User-Agent':'VFXMeshLauncher/'+VERSION,'Accept':'application/vnd.github+json'})
+            with urllib.request.urlopen(req,timeout=10) as response:
+                data=response.read(1024*1024+1)
+                if len(data)>1024*1024:raise ValueError('更新信息过大。')
+            return json.loads(data)
+        except Exception as error:
+            if isinstance(error,urllib.error.HTTPError):error.close()
+            if attempt or not retryable(error):raise
+            time.sleep(.3)
 
 
 def validate_feed(feed):
+    if not isinstance(feed,dict):raise ValueError('更新信息格式无效。')
     if feed.get('schema')!=1 or feed.get('product')!=PLUGIN or feed.get('repository')!=REPOSITORY:
         raise ValueError('更新信息与此插件不匹配。')
     for key in ('plugin','launcher'):
-        item=feed[key];version_tuple(item['version']);asset_url(item['url'])
+        item=feed[key]
+        if not isinstance(item,dict):raise ValueError('更新文件信息格式无效。')
+        version_tuple(item['version']);asset_url(item['url'])
         if not re.fullmatch(r'[0-9a-f]{64}',item.get('sha256','')):raise ValueError('更新信息缺少文件校验。')
         if type(item.get('size')) is not int or not 0<item['size']<=MAX_DOWNLOAD:raise ValueError('更新文件大小无效。')
     if feed.get('engine')!='5.8':raise ValueError('此启动器仅接受 UE 5.8 插件更新。')
@@ -82,8 +115,23 @@ def validate_feed(feed):
 
 
 def check_updates():
+    errors=[]
+    try:return _release_feed()
+    except (OSError,ValueError,KeyError,TypeError) as error:
+        if isinstance(error,urllib.error.HTTPError):error.close()
+        errors.append(('GitHub API',network_error(error)))
+    # These are first-party public URLs, not third-party proxy services. The
+    # static feed is published only after the associated release is available.
+    for label,url in [('仓库版本文件',STATIC_FEED),('正式发行版',WEB+'/releases/latest/download/vfx-manifest.json')]:
+        try:return validate_feed(fetch_json(url))
+        except (OSError,ValueError,KeyError,TypeError) as error:errors.append((label,network_error(error)))
+    raise RuntimeError('自动检查更新失败。\n'+'\n'.join(label+'：'+message for label,message in errors))
+
+
+def _release_feed():
     # Search only this product's releases; unrelated releases in the repo are ignored.
     releases=fetch_json(API+'/releases?per_page=30')
+    if not isinstance(releases,list):raise ValueError('发行版列表格式无效。')
     candidates=[]
     for release in releases:
         if release.get('draft') or release.get('prerelease'):continue
@@ -97,24 +145,50 @@ def check_updates():
     return feed
 
 
+def release_asset_api(url):
+    """Resolve only the exact asset from the configured repository and tag."""
+    parts=urllib.parse.urlparse(asset_url(url)).path.split('/')
+    tag,name=parts[-2:]
+    release=fetch_json(API+'/releases/tags/'+tag)
+    if release.get('draft') or release.get('prerelease') or release.get('tag_name')!=tag:raise ValueError('发行版无效。')
+    matches=[a for a in release.get('assets',[]) if a.get('name')==name and a.get('browser_download_url')==url]
+    if len(matches)!=1:raise ValueError('发行版中找不到对应下载文件。')
+    identity=matches[0].get('id')
+    if type(identity) is not int or identity<=0:raise ValueError('下载文件标识无效。')
+    return API+'/releases/assets/'+str(identity)
+
+
 def download(item, directory, progress=lambda _:None):
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
     url=asset_url(item['url']);destination=directory/(item['sha256']+'.zip')
-    if destination.is_file() and digest(destination)==item['sha256']:return destination
+    if destination.is_file() and destination.stat().st_size==item['size'] and digest(destination)==item['sha256']:return destination
     temporary=directory/(uuid.uuid4().hex+'.part')
+    errors=[]
     try:
-        request=urllib.request.Request(url,headers={'User-Agent':'VFXMeshLauncher/'+VERSION})
-        with urllib.request.urlopen(request,timeout=25) as response,temporary.open('wb') as stream:
-            count=0;checksum=hashlib.sha256()
-            while True:
-                chunk=response.read(256*1024)
-                if not chunk:break
-                count+=len(chunk)
-                if count>item['size'] or count>MAX_DOWNLOAD:raise ValueError('更新文件大小与发布信息不一致。')
-                stream.write(chunk);checksum.update(chunk);progress(count/item['size'])
-        if count!=item['size'] or checksum.hexdigest()!=item['sha256']:
-            raise ValueError('下载校验失败，未安装。请检查网络后重试。')
-        os.replace(temporary,destination);return destination
+        for route in ('direct','api'):
+            try:
+                source=url if route=='direct' else release_asset_api(url)
+                for attempt in range(2):
+                    try:
+                        request=urllib.request.Request(source,headers={'User-Agent':'VFXMeshLauncher/'+VERSION,'Accept':'application/octet-stream'})
+                        with urllib.request.urlopen(request,timeout=20) as response,temporary.open('wb') as stream:
+                            count=0;checksum=hashlib.sha256();progress(0)
+                            while True:
+                                chunk=response.read(256*1024)
+                                if not chunk:break
+                                count+=len(chunk)
+                                if count>item['size'] or count>MAX_DOWNLOAD:raise ValueError('更新文件大小与发布信息不一致。')
+                                stream.write(chunk);checksum.update(chunk);progress(count/item['size'])
+                        if count!=item['size'] or checksum.hexdigest()!=item['sha256']:
+                            raise ValueError('下载校验失败，未安装。请检查网络后重试。')
+                        os.replace(temporary,destination);return destination
+                    except Exception as error:
+                        if isinstance(error,urllib.error.HTTPError):error.close()
+                        if attempt or not retryable(error):raise
+                        time.sleep(.3)
+            except ValueError:raise  # Never disguise corruption as a network issue.
+            except (OSError,RuntimeError,http.client.IncompleteRead) as error:errors.append(network_error(error))
+        raise RuntimeError('两个 GitHub 下载通道均未成功。\n'+'\n'.join(dict.fromkeys(errors))+'\n可使用“浏览器下载”或“安装内置版本”。')
     finally:temporary.unlink(missing_ok=True)
 
 
@@ -193,6 +267,59 @@ def validate_engine(path):
     build=read_json(executable.parents[2]/'Build/Build.version')
     if (build['MajorVersion'],build['MinorVersion'])!=(5,8):raise ValueError('当前插件适用于 UE 5.8，请选择对应引擎。')
     return executable
+
+
+def native_compatibility(engine_path, native_root):
+    """Read-only comparison. Drive letters never participate in fingerprints."""
+    root=validate_engine(engine_path).parents[2]
+    version=read_json(root/'Build/Build.version')
+    build=read_json(root/'Binaries/Win64/UnrealEditor.modules')['BuildId']
+    if not isinstance(build,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',build):raise ValueError('引擎 BuildId 无效。')
+    native_root=Path(native_root)
+    report={'build_id':build,'engine_version':{k:version.get(k) for k in ('MajorVersion','MinorVersion','PatchVersion','Changelist','CompatibleChangelist')},
+            'supported_builds':sorted(p.parent.name for p in native_root.glob('*/manifest.json')),'files':[],'compatible':False}
+    manifest=native_root/build/'manifest.json'
+    if not manifest.is_file():report['reason']='missing_adapter';return report
+    hashes=read_json(manifest)['engine_sha256']
+    if not hashes:raise ValueError('适配组件缺少引擎校验清单。')
+    for name,expected in hashes.items():
+        if not re.fullmatch(r'Binaries/Win64/UnrealEditor-[A-Za-z0-9_-]+\.dll',name):raise ValueError('引擎校验清单路径无效。')
+        if not re.fullmatch(r'[0-9a-f]{64}',expected):raise ValueError('引擎校验指纹无效。')
+        file=root/name;actual=digest(file) if file.is_file() else None
+        report['files'].append({'file':name,'expected_sha256':expected,'actual_sha256':actual,
+                                'status':'match' if actual==expected else 'missing' if actual is None else 'different'})
+    report['compatible']=all(f['status']=='match' for f in report['files'])
+    report['reason']='verified' if report['compatible'] else 'different_files'
+    return report
+
+
+def compatibility_message(report):
+    if report['reason']=='missing_adapter':
+        return '此引擎尚无匹配的原生预览组件。\nBuildId：'+report['build_id']+'\n请导出诊断报告以添加适配。未替换插件或改动项目资产。'
+    different=[f for f in report['files'] if f['status']!='match']
+    lines=[Path(f['file']).name+('（缺失）' if f['status']=='missing' else '（内容不同）') for f in different]
+    return '引擎文件与预览组件不匹配：\n'+'\n'.join(lines)+'\n\n盘符不同不会触发此检查。请确认公司引擎同步完整，或点击“导出诊断报告”定位差异。未替换插件或改动项目资产。'
+
+
+def compatibility_solution(report):
+    if report['compatible']:
+        return '检测通过：引擎 BuildId 与所有必需 DLL 指纹匹配。可安装对应插件；首次安装或原生组件更新前，保存工作并关闭该工程。'
+    if report['reason']=='missing_adapter':
+        return '解决方法：选择工程实际使用的 UnrealEditor.exe；若选择正确，请导出诊断报告，为此构建编译并验证新的原生适配组件。不要修改 BuildId 或复制其他构建的预览 DLL。'
+    missing=any(f['status']=='missing' for f in report['files'])
+    return ('解决方法：先用公司引擎同步工具补齐报告中缺失的文件。\n' if missing else '解决方法：先确认公司引擎的同步批次，以及是否安装过修改引擎 DLL 的补丁。\n')+\
+        '请将引擎可执行文件、DLL 和 .modules 文件同步到同一完整构建，再重新检测。不要仅替换单个 DLL。\n'+\
+        '若必须保留当前构建，请导出诊断报告，按此构建生成并验证适配组件。重新下载插件不能解决实际引擎文件差异；盘符本身无需修改。'
+
+
+def diagnostic_report(engine_path, archive):
+    # No project/engine writes and no source code, assets, credentials or machine
+    # paths in this report. The user chooses whether to share the resulting JSON.
+    with tempfile.TemporaryDirectory(prefix='vfx-diagnostic-') as temporary:
+        plugin=safe_extract(archive,temporary,PLUGIN)
+        report=native_compatibility(engine_path,plugin/'Native/Win64')
+        return {'schema':1,'launcher_version':VERSION,'plugin_version':read_json(plugin/(PLUGIN+'.uplugin'))['VersionName'],
+                'engine':report,'solution':compatibility_solution(report)}
 
 
 def running_editors(info):
@@ -309,12 +436,8 @@ def install(project, archive, expected, editor_probe=running_editors, ipc=bridge
         if (staged/'Native/Win64').is_dir():
             selected=engine_path or detect_engine(info)
             if not selected:raise ValueError('请选择此工程对应的 UE 引擎，以匹配原生预览组件。')
-            root=validate_engine(selected).parents[2]
-            build=read_json(root/'Binaries/Win64/UnrealEditor.modules')['BuildId']
-            manifest=staged/'Native/Win64'/build/'manifest.json'
-            if not manifest.is_file():raise ValueError('此引擎尚无匹配的原生预览组件，需要为当前引擎构建适配包。未更改工程。')
-            for name,checksum in read_json(manifest)['engine_sha256'].items():
-                if digest(root/name)!=checksum:raise ValueError('引擎文件与预览组件不匹配，未更改工程。')
+            report=native_compatibility(selected,staged/'Native/Win64')
+            if not report['compatible']:raise ValueError(compatibility_message(report))
         if descriptor.get('VersionName')!=expected['version']:raise ValueError('安装包版本与更新信息不一致。')
         if info['version'] and version_tuple(expected['version'])<version_tuple(info['version']):raise ValueError('不会将较新插件覆盖为旧版本。恢复旧版请使用备份功能。')
         editors=editor_probe(info)

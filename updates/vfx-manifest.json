@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "product": "VFXMeshGenerator",
+  "repository": "Yck0701/XH-SIMPLE-MODEL",
+  "engine": "5.8",
+  "minimum_launcher": "1.2.0",
+  "notes": "稳定性修复：原生适配组件统一使用 UE 内存分配器，修复旧预览回收崩溃；释放旧面板事件和视图。材质预览复用网格，减少重复生成与引擎文件校验。增加回调防重入和工程写入路径检查，阻断链接目录写入。此次包含原生组件与通信更新，请保存自己的工作并关闭工程后安装。",
+  "plugin": {
+    "version": "1.5.2",
+    "url": "https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.2/VFXMeshGenerator-1.5.2-UE5.8.zip",
+    "sha256": "d12ff95d6b7f58ff5dd9687ff0503db1f3511b4e9b56ccf4c50e2ebe049b6079",
+    "size": 348062
+  },
+  "launcher": {
+    "version": "1.5.2",
+    "url": "https://github.com/Yck0701/XH-SIMPLE-MODEL/releases/download/vfx-v1.5.2/VFXMeshLauncher-1.5.2-Windows.zip",
+    "sha256": "c0377dd3590b56680f491670abe149d581576a7e60e4a0f77b054f67cefb0166",
+    "size": 13973139
+  }
+}

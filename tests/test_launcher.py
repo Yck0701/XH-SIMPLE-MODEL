@@ -191,8 +191,44 @@ class LauncherTests(unittest.TestCase):
             deadline=time.monotonic()+2
             while time.monotonic()<deadline and window.check_time.get()=='尚未检查':window.update();time.sleep(.03)
             self.assertEqual(check.call_count,1);self.assertFalse(window.checking)
-            window.auto_check.set(False);window.save_settings();window.destroy()
+            self.assertIn('网络',window.notes.get())
+            self.assertTrue((app.STATE/'update-error.json').is_file())
+            window.auto_check.set(False);window.save_settings();window.close()
             second=app.App();second.withdraw();self.assertFalse(second.auto_check.get());second.close()
+
+    def test_offline_choice_does_not_depend_on_remote_update(self):
+        import app
+        base=self.root/'bundle';base.mkdir()
+        core.write_json(base/'offline/manifest.json',{'plugin':{'version':'1.5.3','file':'plugin.zip'}})
+        with patch.object(app,'STATE',self.root/'state'),patch.object(app,'BASE',base):
+            window=app.App(auto_check=False);window.withdraw()
+            window.feed={'minimum_launcher':'99.0.0','plugin':{'version':'99.0.0'}}
+            self.assertEqual(window.package_choice(offline_only=True)[0],'offline')
+            with self.assertRaises(ValueError):window.package_choice()
+            window.close()
+
+    def test_compatibility_dialog_keeps_export_and_close_visible(self):
+        import app
+        base=self.root/'bundle';(base/'offline').mkdir(parents=True)
+        archive=base/'offline/plugin.zip';archive.write_bytes(b'package')
+        core.write_json(base/'offline/manifest.json',{'plugin':{'file':'plugin.zip','sha256':core.digest(archive)}})
+        engine={'compatible':False,'reason':'different_files','build_id':'test','files':[{'file':'Binaries/Win64/UnrealEditor-Core.dll',
+            'status':'different','expected_sha256':'a'*64,'actual_sha256':'b'*64}]*11}
+        report={'plugin_version':'1.5.3','engine':engine,'solution':core.compatibility_solution(engine)}
+        with patch.object(app,'STATE',self.root/'state'),patch.object(app,'BASE',base),patch.object(core,'validate_engine',return_value=self.root/'UnrealEditor.exe'),patch.object(core,'diagnostic_report',return_value=report):
+            window=app.App(auto_check=False);window.check_compatibility()
+            deadline=time.monotonic()+3
+            while window.busy and time.monotonic()<deadline:window.update();time.sleep(.02)
+            window.update();dialogs=[w for w in window.winfo_children() if isinstance(w,app.tk.Toplevel)]
+            self.assertEqual(len(dialogs),1);dialog=dialogs[0]
+            def children(parent):
+                for child in parent.winfo_children():yield child;yield from children(child)
+            buttons=[w for w in children(dialog) if isinstance(w,app.ttk.Button)]
+            self.assertEqual({str(b.cget('text')) for b in buttons},{'导出这份检测报告','关闭'})
+            for button in buttons:
+                self.assertTrue(button.winfo_viewable())
+                self.assertLessEqual(button.winfo_rooty()+button.winfo_height(),dialog.winfo_rooty()+dialog.winfo_height())
+            window.close()
 
     def test_launcher_self_update_prepares_verified_version(self):
         import app
