@@ -56,7 +56,7 @@ def main():
     zip_tree(bundle,launcher,'VFXMeshLauncher')
     base=f'https://github.com/{REPOSITORY}/releases/download/vfx-v{VERSION}/'
     feed={'schema':1,'product':'VFXMeshGenerator','repository':REPOSITORY,'engine':'5.8','minimum_launcher':'1.5.4',
-        'notes':'新增本机编译适配：携带原生源码与构建附件，使用所选 UE 的开发文件，独立空工程验证通过后再确认安装。按具体版本和 DLL 指纹隔离适配组件，支持同 BuildId 的不同构建；保留兼容性检查。新增引擎规则缓存缺失时的独立重建。官方与更新后的公司 UE 5.8.3 已验证，包含对应组件；UE 5.8.2 需在目标电脑编译验证。本次升级需要关闭对应工程。'}
+        'notes':'保存按钮更醒目：左侧绿色保存模型，右侧蓝色保存材质，按钮下方显示保存状态；切换环境页仍可保存材质。左侧新增可折叠教程，涵盖快速开始、模型保存、材质保存、Niagara 和预览操作。模型与材质仍分别弹窗确认，只保存指定资产。保留 1.5.4 的自动兼容性检测和本机编译适配。'}
     for key,file in [('plugin',plugin),('launcher',launcher)]:
         feed[key]={'version':VERSION,'url':base+file.name,'sha256':core.digest(file),'size':file.stat().st_size}
     core.validate_feed(feed);core.write_json(release/'vfx-manifest.json',feed)

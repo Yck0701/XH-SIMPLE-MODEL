@@ -6,12 +6,13 @@ from . import engine,preview,storage
 
 
 class Sidebar:
-    def __init__(self,panel,parent):
+    def __init__(self,panel,parent,save_parent):
         self.panel=panel;self.source=None;self.material=None;self.path=None;self.attached=False
         self.show_hidden=False;self.revision=0;self.cache={};self.state=None;self.loading=False
         actions=panel.obj(unreal.HorizontalBox);panel.add(parent,actions)
         panel.button(actions,'刷新参数',lambda:self.refresh(True))
-        self.save_button=panel.button(actions,'保存材质…',self.save)
+        self.save_button=panel.primary_button(save_parent,'保存材质…',self.save,(.06,.22,.48),'打开独立确认窗口：替换原实例，或命名新增实例。')
+        self.save_status=panel.text(save_parent,'尚未保存',10,(.65,.85,.7,1))
         self.live_box=panel.obj(unreal.CheckBox);panel.text(self.live_box,'实时迭代原材质',wrap=False)
         self.live_box.set_tool_tip_text('开启后直接修改原材质实例，所有引用即时更新；写入磁盘仍需保存确认。关闭不会撤销已应用的修改。')
         self.live_box.on_check_state_changed.add_callable(lambda value:panel.safe(lambda:self.set_live(value)))
@@ -19,7 +20,6 @@ class Sidebar:
         self.hidden=panel.obj(unreal.CheckBox);panel.text(self.hidden,'显示未激活参数',wrap=False)
         self.hidden.on_check_state_changed.add_callable(self.hidden_changed);panel.add(parent,self.hidden)
         self.info=panel.text(parent,'请选择材质或材质实例。',9,(.65,.7,.75,1))
-        self.save_status=panel.text(parent,'尚未保存',10,(.65,.85,.7,1))
         self.host=panel.obj(unreal.NativeWidgetHost);panel.fill(panel.add(parent,self.host,0))
         self.host_path=self.host.get_path_name();self.refresh()
 

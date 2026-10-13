@@ -18,6 +18,34 @@ _ticking=False
 
 from .settings_types import VFXUserMaterialSettings
 
+GUIDE_TOPICS=(
+    ('快速开始','四步做出特效网格',
+     '1  调整模型\n在左侧选择形状，拖动尺寸参数。打开“实时更新”后，预览会跟随变化。\n\n'
+     '2  选择自己的材质\n在右侧“材质细节”指定材质或材质实例，再调整下面的参数。\n\n'
+     '3  分别保存\n左侧绿色按钮保存模型；右侧蓝色按钮保存材质。每次都要在弹窗中确认。\n\n'
+     '4  放入 Niagara\n将保存后的静态网格指定给 Mesh Renderer，继续制作粒子效果。'),
+    ('保存模型','模型保存到哪里？',
+     '新模型：展开按钮上方的“保存位置”，在内容浏览器选中目标文件夹，再点“使用所选目录”。模型名可以自己填写。\n\n'
+     '点击“保存生成模型…”后，核对弹窗中的资产路径并确认。保存成功后，按钮下方会显示“模型已保存”。\n\n'
+     '已有模型：从内容浏览器选中本工具生成的网格，点击顶部“载入所选网格”。修改后保存会更新同一个资产，已有 Niagara 引用会保留。\n\n'
+     '模型保存不会代替材质保存；两者需要分别确认。'),
+    ('保存材质','材质调整与保存',
+     '在右侧“材质细节”选择你的材质。默认在预览副本中调整，原材质不会随之改变。\n\n'
+     '点击右侧蓝色“保存材质…”：可选择“替换原实例”，或填写名称“新增实例”。母材质和引擎材质通过新增实例保存。\n\n'
+     '新增实例后，它会用于当前工作台。若要让模型记住这份材质，还需保存模型。\n\n'
+     '“实时迭代原材质”会让所有引用该实例的效果同步变化；写入磁盘仍需保存确认，关闭开关不会撤销已经应用的修改。'),
+    ('Niagara','让网格用于粒子效果',
+     '1  先用左侧绿色按钮保存模型，得到内容浏览器中的 Static Mesh。\n\n'
+     '2  在 Niagara 发射器中添加 Mesh Renderer，将该静态网格指定到 Meshes。\n\n'
+     '3  重新载入同一个网格并调参，Niagara 可继续引用它；保存模型后保留本次修改。\n\n'
+     '粒子颜色、粒子时间和 Renderer 覆盖材质请在 Niagara 中查看。骨骼动画只用于本工具预览。'),
+    ('预览操作','观察效果与整理布局',
+     '左键旋转 · 中键平移\n滚轮 / 右键拖动缩放 · F 聚焦\n\n'
+     '预览底部可切换线框、坐标轴、网格与阴影。线框不透明度为 0 时隐藏，只影响预览。\n\n'
+     '右侧“环境设置”可调整 HDRI、主光和曝光，仅影响当前工作台。\n\n'
+     '拖动左右分隔线改变栏宽；顶部可隐藏侧栏或重置布局。教程标题可点击折叠。'),
+)
+
 
 class Panel:
     def __init__(self,widget):
@@ -30,6 +58,7 @@ class Panel:
         self.controls={};self.rows={};self.refs=[]
         self.sections={};self.left_visible=True;self.right_visible=True;self.sidebar_tab='material'
         self.layout_attached=False;self.layout_sizes=[.21,.54,.25]
+        self.guide_index=0;self._save_state=None
         self.root=widget.find_child_widget_by_name('VerticalBox_0')
         if not self.root:raise RuntimeError('插件面板模板缺失。')
         self.root.clear_children();self.build_ui();self.loading=False;self.last_tick=time.monotonic();self.last_applied=self.snapshot()
@@ -84,6 +113,52 @@ class Panel:
         b=self.obj(unreal.Button);self.text(b,label,wrap=False)
         if tip:b.set_tool_tip_text(tip)
         b.on_clicked.add_callable(lambda:self.safe(action));self.add(parent,b,2);return b
+
+    def primary_button(self,parent,label,action,color,tip):
+        frame=self.obj(unreal.SizeBox);frame.set_min_desired_height(42);self.add(parent,frame,3)
+        # A plain UButton keeps the explicit colors instead of the editor theme's dark tint.
+        b=unreal.new_object(unreal.Button,outer=self.widget);self.refs.append(b);frame.add_child(b)
+        style=b.get_editor_property('widget_style')
+        for key,factor in (('normal',1.),('hovered',1.18),('pressed',.78),('disabled',0.)):
+            tint=tuple(min(1.,v*factor) for v in color) if factor else (.10,.12,.14)
+            style.set_editor_property(key,unreal.SlateBrush(draw_as=unreal.SlateBrushDrawType.BOX,
+                tint_color=unreal.SlateColor(specified_color=unreal.LinearColor(*tint,1))))
+        b.set_style(style);b.set_background_color(unreal.LinearColor(1,1,1,1))
+        text=self.text(b,label,13,(1,1,1,1),False)
+        font=text.get_editor_property('font');font.set_editor_property('typeface_font_name','Bold');text.set_font(font)
+        text.slot.set_padding(unreal.Margin(10,7,10,7))
+        b.set_tool_tip_text(tip);b.on_clicked.add_callable(lambda:self.safe(action))
+        return b
+
+    def build_guide(self,parent):
+        guide=self.section(parent,'guide','使用教程 · 点击主题查看',True)
+        topics=self.obj(unreal.WrapBox);topics.set_inner_slot_padding(unreal.Vector2D(2,3));self.add(guide,topics)
+        self.guide_buttons=[self.button(topics,title,lambda i=i:self.show_guide(i)) for i,(title,_,_) in enumerate(GUIDE_TOPICS)]
+        card=self.obj(unreal.Border);card.set_padding(unreal.Margin(10,10,10,10))
+        card.set_brush_color(unreal.LinearColor(.027,.036,.044,1));self.add(guide,card,3)
+        content=self.obj(unreal.VerticalBox);card.add_child(content)
+        self.guide_title=self.text(content,'',11,(.5,.9,.8,1),False)
+        self.guide_body=self.text(content,'',10,(.8,.84,.88,1))
+        self.show_guide(0)
+
+    def show_guide(self,index):
+        self.guide_index=index;_,title,body=GUIDE_TOPICS[index]
+        self.guide_title.set_text(title);self.guide_body.set_text(body)
+        for i,button in enumerate(self.guide_buttons):
+            button.set_background_color(unreal.LinearColor(*((.25,.65,.58,1) if i==index else (.3,.34,.4,1))))
+
+    def refresh_save_state(self):
+        state=(bool(self.custom_mesh),len(self.imported_assets),bool(self.mesh),self.unsaved,self.geometry_dirty,self.surface_dirty)
+        if state==self._save_state:return
+        self._save_state=state
+        if self.custom_mesh:
+            text='● 本次导入资产尚未保存' if self.imported_assets else '已有自定义模型：仅预览，无需保存网格'
+        elif not self.mesh:text='● 预览草稿 · 点击上方按钮创建模型资产'
+        elif self.unsaved or self.geometry_dirty or self.surface_dirty:text='● 模型有修改 · 尚未保存到磁盘'
+        else:text='✓ 模型已保存 · 材质请在右侧单独保存'
+        self.model_save_status.set_text(text)
+        color=(1.,.78,.32,1.) if text.startswith('●') else (.5,.9,.65,1.)
+        self.model_save_status.set_color_and_opacity(unreal.SlateColor(specified_color=unreal.LinearColor(*color)))
 
     def safe(self,action):
         if self.busy:return
@@ -184,8 +259,9 @@ class Panel:
         self.button(actions,'使用所选目录',self.pick_folder)
         self.name=self.obj(unreal.EditableTextBox);self.name.set_hint_text('模型名，留空自动命名');self.add(save,self.name)
         self.text(save,'在内容浏览器选文件夹，再点“使用所选目录”。已有模型保存在原位置。',9,(.6,.65,.7,1))
-        self.save_button=self.button(left,'保存生成模型…',self.save,'每次确认后只保存列出的目标资产')
-        self.save_button.set_background_color(unreal.LinearColor(.08,.3,.3,1))
+        self.save_button=self.primary_button(left,'保存生成模型…',self.save,(.045,.34,.22),'核对弹窗中的目标路径并确认；模型与材质分别保存。')
+        self.model_save_status=self.text(left,'',10,(1.,.78,.32,1.))
+        self.build_guide(left)
         right=self.obj(unreal.VerticalBox);self.center_box=right
         actions=self.obj(unreal.HorizontalBox);self.add(right,actions)
         self.heading(actions,'实时预览')
@@ -211,12 +287,13 @@ class Panel:
         sidebar=self.obj(unreal.VerticalBox);material_box.add_child(sidebar)
         tabs=self.obj(unreal.HorizontalBox);self.add(sidebar,tabs)
         self.sidebar_buttons={key:self.button(tabs,title,lambda key=key:self.switch_sidebar(key)) for key,title in [('material','材质细节'),('environment','环境设置')]}
+        material_save_area=self.obj(unreal.VerticalBox);self.add(sidebar,material_save_area,0)
         self.sidebar_switcher=self.obj(unreal.WidgetSwitcher);self.fill(self.add(sidebar,self.sidebar_switcher,0))
         material_column=self.obj(unreal.VerticalBox);self.sidebar_switcher.add_child(material_column)
         self.pickers=VFXUserMaterialSettings();details=self.obj(unreal.DetailsView)
         details.set_editor_property('force_hidden_property_visibility',True);details.set_editor_property('allow_filtering',False)
         details.set_object(self.pickers);details.on_property_changed.add_callable(self.picker_changed);self.add(material_column,details)
-        self.material_sidebar=material_sidebar.Sidebar(self,material_column)
+        self.material_sidebar=material_sidebar.Sidebar(self,material_column,material_save_area)
         environment_column=self.obj(unreal.VerticalBox);self.sidebar_switcher.add_child(environment_column)
         self.environment_sidebar=environment_sidebar.Sidebar(self,environment_column)
         self.switch_sidebar(self.sidebar_tab)
@@ -249,8 +326,10 @@ class Panel:
         self.geometry_actions.set_visibility(unreal.SlateVisibility.COLLAPSED if self.custom_mesh else unreal.SlateVisibility.VISIBLE)
         if hasattr(self,'save_button'):
             self.save_button.set_visibility(unreal.SlateVisibility.VISIBLE if not self.custom_mesh or self.imported_assets else unreal.SlateVisibility.COLLAPSED)
+            self.save_button.get_parent().set_visibility(self.save_button.get_visibility())
             self.save_button.get_child_at(0).set_text('保存导入资产…' if self.custom_mesh else '保存生成模型…')
             self.locate_button.set_is_enabled(bool(self.custom_mesh or self.mesh))
+            self.refresh_save_state()
         self.controls[('preview','wireframe')].set_is_enabled(not isinstance(self.custom_mesh,unreal.SkeletalMesh))
 
     def change(self,target,key,value):
@@ -426,6 +505,7 @@ class Panel:
         path=self.mesh.get_path_name().split('.')[0] if self.mesh else engine.new_asset_path(self.settings,str(self.folder.get_text()),str(self.name.get_text()))
         if not self.confirm('确认保存当前模型','仅保存以下模型及其生成参数：\n'+path+'\n\n不会保存材质、关卡或其他脏资产。是否继续？'):
             self.status.set_text('已取消保存，没有写入文件。');return False
+        self.unsaved=True
         if not self.mesh:
             folder,name=path.rsplit('/',1)
             self.mesh,_=engine.create(self.settings,folder,name,self.surface)
@@ -446,6 +526,7 @@ class Panel:
         self.material_sidebar.tick()
         self.viewer.tick(dt)
         self.environment_sidebar.tick()
+        self.refresh_save_state()
 
 
 def _restore(panel,old):
@@ -469,6 +550,7 @@ def _restore(panel,old):
     for key,(body,_,_) in getattr(old,'sections',{}).items():
         if key in panel.sections:panel.expand_section(key,body.get_visibility()!=unreal.SlateVisibility.COLLAPSED)
     panel.switch_sidebar(getattr(old,'sidebar_tab','material'))
+    panel.show_guide(getattr(old,'guide_index',0))
     if panel.mesh:
         material=panel.mesh.get_material(0)
         if panel.surface.get('mode')!='custom':panel.surface={'mode':'custom','material':material.get_path_name() if material else ''}
