@@ -56,8 +56,8 @@ def main():
     launcher=release/f'VFXMeshLauncher-{VERSION}-Windows.zip'
     zip_tree(bundle,launcher,'VFXMeshLauncher')
     base=f'https://github.com/{REPOSITORY}/releases/download/vfx-v{VERSION}/'
-    feed={'schema':1,'product':'VFXMeshGenerator','repository':REPOSITORY,'engine':'5.8','minimum_launcher':'1.5.7',
-        'notes':'请先更新启动器到 1.5.7。增强工程关联、附近目录、注册表、Epic 安装记录与每工程引擎记忆；更换选择自动检测，多候选明确列出。新增一键编译、独立验证和安装确认的连续流程，支持取消、耗时和失败重试。新增三款 PNG/ICO 图标。保留 UE 5.8、版本、BuildId、DLL 指纹与安装包校验，不改写工程关联或引擎文件。'}
+    feed={'schema':1,'product':'VFXMeshGenerator','repository':REPOSITORY,'engine':'5.8','minimum_launcher':'1.5.8',
+        'notes':'请先更新启动器到 1.5.8。编译前按当前 UE 要求验证 MSVC、Windows SDK、引擎开发文件与 .NET。缺少支持的组件时，下载并验证微软安装器、预选组件，用户完成系统授权与安装确认后自动复查和试编译，再继续插件编译、验证与安装确认。支持重试、取消和重启提示；不强制终止系统安装器，不自动重启，不修改工程关联或无关项目文件。'}
     for key,file in [('plugin',plugin),('launcher',launcher)]:
         feed[key]={'version':VERSION,'url':base+file.name,'sha256':core.digest(file),'size':file.stat().st_size}
     core.validate_feed(feed);core.write_json(release/'vfx-manifest.json',feed)

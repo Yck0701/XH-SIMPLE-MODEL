@@ -15,6 +15,8 @@ import uuid
 import zipfile
 import core
 import native_profiles
+import build_environment
+import environment_installer
 
 _cancel=ContextVar('build_cancel',default=None)
 
@@ -110,16 +112,12 @@ def preflight(engine_path,payload):
     dotnets=[p for p in (engine/'Binaries/ThirdParty/DotNet').rglob('dotnet.exe')
              if any((p.parent/'shared/Microsoft.NETCore.App').glob(major+'.*')) and 'arm64' not in p.as_posix().lower()]
     if len(dotnets)!=1:raise ValueError('找不到引擎配套的 .NET '+major+' 运行环境。请补齐此引擎的开发组件。')
-    vswhere=Path(os.environ.get('ProgramFiles(x86)','C:/Program Files (x86)'))/'Microsoft Visual Studio/Installer/vswhere.exe'
-    if not vswhere.is_file():raise ValueError('未检测到 Visual Studio C++ 工具链。请安装 Visual Studio / Build Tools 的 C++ 游戏开发或桌面开发、MSVC x64/x86 和 Windows SDK。')
-    result=subprocess.run([str(vswhere),'-products','*','-requires','Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
-                           '-property','installationPath'],capture_output=True,encoding='utf-8',errors='replace',timeout=30,
-                          creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
-    if result.returncode or not result.stdout.strip():raise ValueError('缺少 MSVC x64/x86 编译器。请在 Visual Studio Installer 中添加 C++ 开发工作负载与 Windows SDK；版本以所选 UE 的要求为准。')
-    if not windows_sdks():raise ValueError('未找到完整的 Windows SDK（头文件、x64 库与资源编译器）。请在 Visual Studio Installer 的“单个组件”中安装所选 UE 要求的 Windows SDK，然后点击重试。')
     libs=libraries(engine)
+    environment=build_environment.inspect(engine)
+    if not environment['ready']:raise build_environment.EnvironmentRequired(environment)
     if shutil.disk_usage(Path(payload).anchor).free<2*1024**3:raise ValueError('启动器所在磁盘可用空间不足 2 GB。')
-    return {'engine':engine,'dotnet':dotnets[0],'libraries':libs,'version':core.engine_version_label(core.read_json(engine/'Build/Build.version'))}
+    return {'engine':engine,'dotnet':dotnets[0],'libraries':libs,'environment':environment,
+            'version':core.engine_version_label(core.read_json(engine/'Build/Build.version'))}
 
 
 def run_process(args,cwd,log,timeout,env=None):
@@ -228,6 +226,7 @@ def build(engine_path,archive,item,payload,cache,progress=lambda message:None,ca
 
 def _build(engine_path,archive,item,payload,cache,progress):
     check_cancelled()
+    environment_installer.check_restart(Path(cache).parent)
     progress('1/4  检查引擎开发文件与 C++ 工具链…')
     config=preflight(engine_path,payload);engine=config['engine']
     if core.digest(archive)!=item['sha256'] or Path(archive).stat().st_size!=item['size']:raise ValueError('原始插件安装包校验失败。')
@@ -238,16 +237,25 @@ def _build(engine_path,archive,item,payload,cache,progress):
     work=cache/('work-'+uuid.uuid4().hex);work.mkdir()
     core.write_json(cache/'last-build.json',{'work':str(work),'status':'building'})
     try:
+        if config.get('environment'):
+            progress('1/4  正在试编译验证 MSVC / Windows SDK 与引擎 .NET…')
+            build_environment.probe(config['environment'],work)
+            run_process([config['dotnet'],'--info'],work,work/'environment-dotnet.log',30)
+            core.write_json(work/'environment.json',config['environment'])
+            check_cancelled()
         host=work/'host';host.mkdir();target=host/'Plugins/VFXPreviewBuild'
         shutil.copytree(Path(payload)/'CompilerHost',target)
         project=host/'NativeHost.uproject'
         core.write_json(project,{'FileVersion':3,'Plugins':[{'Name':'VFXPreviewBuild','Enabled':True}]})
         check_cancelled()
         progress('2/4  由所选 UE 生成编译配置…（首次可能需要数分钟）')
-        env=os.environ.copy();env.update(DOTNET_CLI_TELEMETRY_OPTOUT='1',DOTNET_SKIP_FIRST_TIME_EXPERIENCE='1',DOTNET_NOLOGO='1')
+        env=os.environ.copy()
+        for name in ('CL','_CL_','LINK','_LINK_','INCLUDE','LIB','LIBPATH'):env.pop(name,None)
+        env.update(DOTNET_CLI_TELEMETRY_OPTOUT='1',DOTNET_SKIP_FIRST_TIME_EXPERIENCE='1',DOTNET_NOLOGO='1')
+        selected_tools=build_environment.ubt_arguments(config['environment']) if config.get('environment') else []
         repaired=configure(config,['UnrealEditor','Win64','Development','-Project='+str(project),'-plugin='+str(target/'VFXPreviewBuild.uplugin'),
                      '-NoUBTMakefiles','-NoHotReload','-SkipBuild','-NoEngineChanges','-NoUBA','-NoXGE','-NoFASTBuild','-NoSNDBS',
-                     '-Log='+str(work/'ubt.log'),'-UTF8Output'],work,payload,env,progress)
+                     '-Log='+str(work/'ubt.log'),'-UTF8Output',*selected_tools],work,payload,env,progress)
         configs=list(target.rglob('VFXPreviewBuild.Shared.rsp'))
         if len(configs)!=1:raise ValueError('UE 未生成唯一的编译配置，请查看 '+str(work/'configure.log'))
         plugin=core.safe_extract(archive,work/'stage',core.PLUGIN)

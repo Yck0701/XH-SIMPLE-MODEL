@@ -11,6 +11,8 @@ import webbrowser
 import core
 import engine_discovery as discovery
 import native_builder
+import build_environment
+import environment_installer
 
 
 def inspect_selection(project,engine,base,state,item,origin,remembered='',known=()):
@@ -30,12 +32,16 @@ def inspect_selection(project,engine,base,state,item,origin,remembered='',known=
         if '缓存' not in str(error) and 'receipt.json' not in str(error):raise
         cache_warning=str(error)
         report=core.diagnostic_report(engine,archive)
-    preflight_error=''
+    preflight_error='';environment=None
     if not report['engine']['compatible']:
-        try:native_builder.preflight(engine,base/'compiler')
+        try:
+            environment_installer.check_restart(state)
+            native_builder.preflight(engine,base/'compiler')
+        except build_environment.EnvironmentRequired as error:
+            preflight_error=str(error);environment=error.report
         except Exception as error:preflight_error=str(error)
     return {'info':info,'engine':engine,'discovery':found,'archive':archive,'item':dict(item),'origin':origin,
-            'report':report,'preflight_error':preflight_error,'cache_warning':cache_warning}
+            'report':report,'preflight_error':preflight_error,'cache_warning':cache_warning,'environment':environment}
 
 
 class SetupFlow:
@@ -52,7 +58,7 @@ class SetupFlow:
         self.setup_result=None;self.setup_candidates=[];self._selection_revision=0
         self._setup_after=None;self._setup_tick=None;self._scan_running=False;self._scan_again=False
         self._suppress_selection=False;self._project_key=discovery.path_key(self.project.get())
-        self._cancel_setup=None;self._task_started=None
+        self._cancel_setup=None;self._task_started=None;self._environment_task=False
 
     def bind_setup(self):
         self.project.trace_add('write',lambda *_:self.selection_changed(project_changed=True))
@@ -165,8 +171,9 @@ class SetupFlow:
             self.setup_button.configure(text='确认安装到此工程…')
         elif result['preflight_error']:
             self.setup_title.set('需要补齐编译条件')
-            self.setup_detail.set(result['preflight_error']+'\n点击下方查看解决步骤；处理后可直接重试，无需重新选择工程。')
-            self.setup_button.configure(text='查看解决步骤…')
+            repair=(result.get('environment') or {}).get('repair')
+            self.setup_detail.set(result['preflight_error']+('\n可自动下载微软安装器并选好缺失组件；完成后重新验证，继续编译。' if repair else '\n点击下方查看解决步骤；处理后可直接重试，无需重新选择工程。'))
+            self.setup_button.configure(text='补齐环境并继续编译…' if repair else '查看解决步骤…')
         else:
             self.setup_title.set('需要适配，已具备编译条件')
             self.setup_detail.set('插件 '+result['item']['version']+' 尚无此引擎的匹配组件。点击下方后自动编译 → 独立验证 → 确认安装，通常需要数分钟。')
@@ -197,14 +204,16 @@ class SetupFlow:
         if not self.engine.get().strip() and self.setup_candidates:self.choose_engine();return
         self.start_inspection(offline_only=offline_only)
 
-    def continue_setup(self,context):
+    def continue_setup(self,context,compile_confirmed=False):
         if not self.context_current(context):return
         if not context.get('info'):
             self.setup_failed('请先选择要安装的 .uproject 工程。');return
         if context['report']['engine']['compatible']:self.confirm_setup_install(context);return
         if context['preflight_error']:
+            if (context.get('environment') or {}).get('repair'):
+                self.prepare_environment(context);return
             self.show_setup_solution(context['preflight_error']);return
-        if not messagebox.askyesno('开始自动编译与验证',
+        if not compile_confirmed and not messagebox.askyesno('开始自动编译与验证',
                 '引擎：'+context['engine']+'\n插件：'+context['item']['version']+
                 '\n\n将自动完成：编译专用组件 → 在独立空工程验证 → 显示安装确认。\n过程通常需要数分钟，可取消；不修改引擎文件。\n\n是否开始？',parent=self):return
         base,state=self.setup_paths();self._cancel_setup=threading.Event();cancel=self._cancel_setup
@@ -223,6 +232,45 @@ class SetupFlow:
             context['cache_warning']=''
             self.setup_title.set('编译与验证通过，等待安装确认')
             self.confirm_setup_install(context)
+        self.worker(job,done)
+
+    def prepare_environment(self,context):
+        if not self.context_current(context):return
+        plan=context['environment']['repair'];base,state=self.setup_paths()
+        components='\n'.join('• '+c.replace('Microsoft.VisualStudio.Component.','') for c in plan['components'])
+        target=('补齐 '+plan['target']['installationPath']) if plan.get('target') else '安装 Microsoft Visual Studio 2022 Build Tools'
+        if plan.get('update_first'):target='先升级 Visual Studio 2022，再'+target
+        if not messagebox.askyesno('补齐环境并继续编译',target+'\n'+components+
+                '\n\n将从微软官网下载并验证安装器签名，通常需要下载数 GB，请预留至少 8 GB 空间。'
+                '\n微软窗口会预选组件；如出现许可、安装确认或管理员授权，请由你完成。'
+                '\n完成后自动验证环境 → 编译 → 独立验证 → 确认目标工程安装。'
+                '\n不会自动重启电脑；环境安装属于系统组件变更。\n\n是否开始？',parent=self):return
+        self._cancel_setup=threading.Event();cancel=self._cancel_setup;self._environment_task=True
+        self.begin_setup_task('正在准备编译环境…')
+        self.setup_detail.set('组件已自动选好。请留意微软安装器的许可、授权和进度窗口；安装完成后关闭该窗口，启动器会自动继续。')
+        def job():
+            def progress(message):
+                self.events.put(('setup_phase',message));self.setup_log(message)
+            try:
+                status=environment_installer.install(plan,state,progress,cancel)
+                if status=='restart':return {'restart':True}
+                progress('环境安装器已退出，正在重新验证当前引擎的编译条件…')
+                config=native_builder.preflight(context['engine'],base/'compiler')
+                build_environment.probe(config['environment'],state/'Environment')
+                return {'ready':True}
+            except Exception as error:return {'error':str(error),'trace':traceback.format_exc()}
+        def done(outcome):
+            self.end_setup_task();self._environment_task=False
+            if 'error' in outcome:
+                self.setup_log(outcome['trace']);self.setup_failed(outcome['error']+'\n可在微软安装器中补齐后点击重试；不会反复自动安装。');return
+            if outcome.get('restart'):
+                self.setup_title.set('环境已安装，需要重启电脑')
+                self.setup_detail.set('请保存自己的工作后重启 Windows，再打开此启动器。工程与引擎选择已保存；点击继续即可重新验证。启动器不会替你重启。')
+                self.setup_button.configure(text='重启后检测并继续…');return
+            if cancel.is_set():self.setup_failed('已停止自动继续，可稍后重试。');return
+            if not self.context_current(context):return
+            context['preflight_error']='';context['environment']=None
+            self.continue_setup(context,compile_confirmed=True)
         self.worker(job,done)
 
     def context_current(self,context):
@@ -273,7 +321,8 @@ class SetupFlow:
 
     def cancel_setup(self):
         if self._cancel_setup:
-            self._cancel_setup.set();self.cancel_button.configure(state='disabled');self.setup_title.set('正在取消本次编译，请稍等…')
+            self._cancel_setup.set();self.cancel_button.configure(state='disabled')
+            self.setup_title.set('已停止自动继续；请在微软安装器中取消或完成安装。' if self._environment_task else '正在取消本次编译，请稍等…')
 
     def setup_failed(self,message):
         self.setup_title.set('尚未完成，请按提示处理')

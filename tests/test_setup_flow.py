@@ -14,6 +14,8 @@ import core
 import engine_discovery
 import native_builder
 import setup_flow
+import build_environment
+import environment_installer
 
 
 class SetupFlowTests(unittest.TestCase):
@@ -121,6 +123,43 @@ class SetupFlowTests(unittest.TestCase):
         context=self.context(False);context['preflight_error']='缺少 MSVC'
         with patch.object(self.window,'show_setup_solution') as solution,patch.object(native_builder,'build') as build,patch.object(app.messagebox,'askyesno') as ask:
             self.window.continue_setup(context);solution.assert_called_once_with('缺少 MSVC');build.assert_not_called();ask.assert_not_called()
+
+    def environment_context(self):
+        context=self.context(False);context['preflight_error']='缺少 MSVC'
+        context['environment']={'repair':{'mode':'install','target':None,'components':['Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64']}}
+        return context
+
+    def test_missing_environment_installs_rechecks_probes_and_continues_to_confirmed_install(self):
+        context=self.environment_context();sequence=[]
+        def record(name,result):
+            def called(*args,**kwargs):sequence.append(name);return result
+            return called
+        with patch.object(app.messagebox,'askyesno',return_value=True) as ask,patch.object(environment_installer,'install',side_effect=record('environment','recheck')),patch.object(native_builder,'preflight',side_effect=record('preflight',{'environment':{}})),patch.object(build_environment,'probe',side_effect=record('probe',True)),patch.object(native_builder,'build',side_effect=record('build',{})),patch.object(native_builder,'cached',return_value=(self.archive,self.item)),patch.object(core,'install',side_effect=record('install',{'mode':'installed'})):
+            self.window.continue_setup(context);self.wait(lambda:self.window.setup_title.get()=='安装完成，可以打开工作台')
+        self.assertEqual(sequence,['environment','preflight','probe','build','install'])
+        self.assertEqual([c.args[0] for c in ask.call_args_list],['补齐环境并继续编译','确认安装到此工程'])
+
+    def test_declining_environment_install_changes_nothing(self):
+        before=core.inventory(self.project.parent)
+        with patch.object(app.messagebox,'askyesno',return_value=False),patch.object(environment_installer,'install') as install,patch.object(native_builder,'build') as build:
+            self.window.continue_setup(self.environment_context());install.assert_not_called();build.assert_not_called()
+        self.assertEqual(before,core.inventory(self.project.parent))
+
+    def test_reboot_required_never_compiles_or_installs(self):
+        with patch.object(app.messagebox,'askyesno',return_value=True),patch.object(environment_installer,'install',return_value='restart'),patch.object(native_builder,'build') as build,patch.object(core,'install') as install:
+            self.window.continue_setup(self.environment_context());self.wait(lambda:not self.window.busy)
+            self.assertEqual(self.window.setup_title.get(),'环境已安装，需要重启电脑');build.assert_not_called();install.assert_not_called()
+
+    def test_success_exit_but_still_missing_environment_does_not_loop_install_or_compile(self):
+        with patch.object(app.messagebox,'askyesno',return_value=True),patch.object(environment_installer,'install',return_value='recheck') as repair,patch.object(native_builder,'preflight',side_effect=ValueError('缺少 SDK')),patch.object(native_builder,'build') as build,patch.object(core,'install') as install:
+            self.window.continue_setup(self.environment_context());self.wait(lambda:not self.window.busy)
+            repair.assert_called_once();build.assert_not_called();install.assert_not_called()
+            self.assertIn('缺少 SDK',self.window.setup_detail.get())
+
+    def test_environment_signature_or_download_failure_never_reaches_compile(self):
+        with patch.object(app.messagebox,'askyesno',return_value=True),patch.object(environment_installer,'install',side_effect=ValueError('签名校验失败')),patch.object(native_builder,'build') as build,patch.object(core,'install') as install:
+            self.window.continue_setup(self.environment_context());self.wait(lambda:not self.window.busy)
+            self.assertIn('签名校验失败',self.window.setup_detail.get());build.assert_not_called();install.assert_not_called()
 
     def test_changed_target_cannot_use_previous_install_context(self):
         context=self.context();other=self.root/'another.uproject';core.write_json(other,{})

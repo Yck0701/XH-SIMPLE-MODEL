@@ -341,7 +341,9 @@ class App(SetupFlow,tk.Tk):
             record=core.read_json(STATE/'NativeBuilds/last-build.json');path=Path(record['work']).resolve()
             if not path.is_relative_to((STATE/'NativeBuilds').resolve()) or not path.is_dir():raise ValueError('工作目录不存在。')
             os.startfile(str(path))
-        except (OSError,ValueError,KeyError):messagebox.showinfo('编译日志','尚无编译记录。先选择引擎，再点击“为当前引擎编译适配”。',parent=self)
+        except (OSError,ValueError,KeyError):
+            if (STATE/'Environment').is_dir():os.startfile(str(STATE/'Environment'))
+            else:messagebox.showinfo('编译日志','尚无编译记录。先选择引擎，再点击“为当前引擎编译适配”。',parent=self)
 
     def export_diagnostic(self):
         try:
